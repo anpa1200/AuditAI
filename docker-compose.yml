@@ -1,0 +1,28 @@
+services:
+  assessment:
+    build: .
+    image: host-sec-assessment:latest
+    container_name: host-sec-assessment
+    # Required for host process enumeration
+    pid: host
+    # Use host network namespace for accurate network scanning
+    network_mode: host
+    # Capabilities for nmap raw scans and /proc access
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_PTRACE
+      - AUDIT_READ
+    # Host filesystem mounts (read-only)
+    volumes:
+      - /:/host:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /var/log:/host/var/log:ro
+      - ./output:/output
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - HOST_ROOT=/host
+      - OUTPUT_DIR=/output
+    # Remove container after run
+    restart: "no"
