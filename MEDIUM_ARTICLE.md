@@ -80,19 +80,39 @@ The script will:
 
 ## Architecture Overview
 
-The tool is intentionally simple at the top level:
+### The Big Picture
+
+AuditAI is structured as a three-stage pipeline. Each stage is a clean handoff — scanners know nothing about AI, the AI layer knows nothing about report templates, and the report layer just renders a `Report` dataclass.
 
 ```
-Scan → AI Analysis → Report
+┌─────────────────────────────────────────────────────────────────┐
+│                     HOST MACHINE                                │
+│                                                                 │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │              DOCKER CONTAINER (read-only)                │  │
+│  │                                                          │  │
+│  │  ┌─────────────┐    ┌──────────────┐    ┌────────────┐  │  │
+│  │  │   STAGE 1   │    │   STAGE 2    │    │  STAGE 3   │  │  │
+│  │  │             │    │              │    │            │  │  │
+│  │  │  9 Scanner  │───▶│  Claude AI   │───▶│   Report   │  │  │
+│  │  │  Modules    │    │  Analysis    │    │ Generator  │  │  │
+│  │  │  (parallel) │    │  (parallel)  │    │            │  │  │
+│  │  └─────────────┘    └──────────────┘    └────────────┘  │  │
+│  │         │                  │                   │         │  │
+│  │         ▼                  ▼                   ▼         │  │
+│  │   ModuleResult[]    Finding[] +          HTML + .md      │  │
+│  │   raw_output dicts  attack chains        ./output/       │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                                                                 │
+│  /proc  /sys  /etc  /var  /home  /usr  (mounted read-only)     │
+└─────────────────────────────────────────────────────────────────┘
 ```
-
-But under the hood, several design decisions make it production-worthy.
 
 ### Why Docker?
 
-Running security tooling directly on a host is messy — it means installing nmap, lynis, Python dependencies, and dealing with version conflicts. Docker gives you a clean, reproducible environment with all tools pre-installed.
+Running security tooling directly on a host is messy — it means installing nmap, lynis, Python dependencies, and dealing with version conflicts across distributions. Docker gives you a clean, reproducible environment with all tools pre-installed, pinned to known versions.
 
-The trick is giving the container *read-only* access to the host system it's assessing. This is done through a specific set of Docker flags:
+The bigger advantage is **isolation without losing visibility**. The trick is giving the container *read-only* access to the host system it's assessing through a precise set of Docker flags:
 
 ```bash
 docker run --rm \
@@ -107,34 +127,178 @@ docker run --rm \
   -v /sys:/host/sys:ro \
   -v /var/log:/host/var/log:ro \
   -v ./output:/output \
-  host-sec-assessment:latest
+  auditai:latest
 ```
 
-Each flag has a specific reason:
+Each flag exists for a specific reason — none are added "just in case":
 
 | Flag | Why it's needed |
 |------|----------------|
-| `--pid=host` | Without this, `/proc` only shows container PIDs. We need the full host process table. |
-| `--network=host` | Places the container in the host's network namespace. nmap sees the real network interfaces and sockets, not just the container's virtual interface. |
-| `--cap-add=NET_RAW` | nmap SYN scans (`-sS`) require raw socket access. Without this, nmap falls back to connect scans that miss many services. |
-| `--cap-add=SYS_PTRACE` | Needed to read `/proc/<pid>/exe` symlinks and map files to running processes. |
-| `-v /:/host:ro` | Read-only access to the entire host filesystem — `/etc`, `/var`, `/usr`, everything. The `:ro` flag is critical: the container cannot modify anything. |
-| `-v /proc:/host/proc:ro` | `/proc` is a virtual filesystem that isn't captured by the `/` bind mount. It must be mounted separately. Same for `/sys`. |
+| `--pid=host` | Without this, `/proc` only shows container PIDs. We need the full host process table to enumerate all running processes, read their capabilities, and inspect their executables. |
+| `--network=host` | Places the container in the host's network namespace. nmap then scans from the real host's perspective — it sees actual interfaces, real IP addresses, and the genuine socket state. Without this, nmap would only see the container's virtual `eth0`. |
+| `--cap-add=NET_RAW` | nmap SYN scans (`-sS`) require raw socket access to craft TCP packets manually. Without this capability, nmap falls back to full TCP connect scans (`-sT`) which are slower, noisier, and miss half-open ports. |
+| `--cap-add=NET_ADMIN` | Required to read iptables rules and netfilter state from inside the container. |
+| `--cap-add=SYS_PTRACE` | Needed to follow `/proc/<pid>/exe` symlinks and read memory maps of running processes. Without it, the processes scanner can enumerate PIDs but can't resolve what binary is running. |
+| `--cap-add=AUDIT_READ` | Allows reading the kernel audit log, which records privilege escalations and security policy violations. |
+| `-v /:/host:ro` | Bind-mounts the entire host root filesystem at `/host` inside the container, read-only. This gives scanners access to `/etc`, `/var`, `/usr`, `/home`, and everything else — without any write access. |
+| `-v /proc:/host/proc:ro` | `/proc` is a virtual filesystem generated by the kernel on-demand. It is **not** captured by the `/` bind mount above. It must be mounted separately for the processes and kernel scanners to work. |
+| `-v /sys:/host/sys:ro` | Same reason as `/proc`. Contains kernel hardware info, security module status, CPU vulnerability data, and network stack parameters. |
 
-The container runs as root internally (required for raw socket nmap), but the combination of read-only mounts and no `--privileged` flag keeps the blast radius minimal.
+The container runs as root internally — required for raw socket nmap and `/proc` reads — but `--privileged` is explicitly **not** used. Without `--privileged`, the container still operates within Linux namespace boundaries and cannot modify host kernel parameters, load kernel modules, or escape via device access.
 
 ### The Path Convention
 
-Every scanner reads from `/host/` instead of `/`. The config module defines:
+Every scanner uses a single path prefix defined in `config.py`:
 
 ```python
 HOST_ROOT = os.environ.get("HOST_ROOT", "/host")
-PROC_PATH = f"{HOST_ROOT}/proc"
-ETC_PATH  = f"{HOST_ROOT}/etc"
-SYS_PATH  = f"{HOST_ROOT}/sys"
+
+PROC_PATH = f"{HOST_ROOT}/proc"    # /host/proc  →  host's process table
+SYS_PATH  = f"{HOST_ROOT}/sys"     # /host/sys   →  kernel interfaces
+ETC_PATH  = f"{HOST_ROOT}/etc"     # /host/etc   →  config files
+VAR_PATH  = f"{HOST_ROOT}/var"     # /host/var   →  package databases, logs
+HOME_PATH = f"{HOST_ROOT}/home"    # /host/home  →  user directories
 ```
 
-Setting `HOST_ROOT=""` makes every path fall back to the real system paths, so you can also run the tool directly on a host without Docker — useful for development and testing.
+Setting `HOST_ROOT=""` collapses every path back to the real system root, so the tool runs directly on a bare host without Docker. This makes local development painless — no Docker rebuild needed to test a scanner change.
+
+### Stage 1: Scanner Execution Model
+
+All nine scanners extend a single abstract base class:
+
+```python
+class BaseScanner(ABC):
+    name: str
+
+    def run(self) -> ModuleResult:
+        start = time.time()
+        try:
+            raw_output, findings = self._scan()
+            return ModuleResult(
+                module_name=self.name,
+                findings=findings,      # empty list before AI analysis
+                raw_output=raw_output,  # everything collected, sent to AI
+                duration_seconds=time.time() - start,
+            )
+        except Exception as e:
+            # Critical design: a failed scanner never aborts the run
+            return ModuleResult(..., error=str(e))
+
+    @abstractmethod
+    def _scan(self) -> tuple[dict, list]:
+        ...
+```
+
+The base class enforces two contracts:
+
+1. **Error isolation.** A scanner that throws an exception returns an empty `ModuleResult` with `error` set. The rest of the assessment continues unaffected. If nmap fails because `NET_RAW` wasn't granted, the network module fails gracefully while the other eight modules complete normally. The final report marks the failed module clearly.
+
+2. **Separation of collection and analysis.** Scanners return raw data in `raw_output` — they do not produce findings. Findings come from the AI in Stage 2. This means a scanner never needs to be updated when security baselines change; only the AI prompt needs tuning.
+
+**Execution order matters.** The runner uses a `ThreadPoolExecutor` to run the eight fast scanners in parallel, while lynis (which takes 3–7 minutes) runs concurrently in a separate thread:
+
+```
+t=0s   ┌── network scanner    ──┐
+       ├── services scanner   ──┤
+       ├── os_hardening       ──┤  complete ~30–90s
+       ├── users scanner      ──┤
+       ├── processes scanner  ──┤
+       ├── filesystem scanner ──┤
+       ├── kernel scanner     ──┤
+       └── packages scanner   ──┘
+       ┌── lynis scanner ──────────────────────┐  complete ~3–7min
+```
+
+All results are collected before Stage 2 begins. If lynis is skipped via `--skip lynis`, the total scan time drops to under 2 minutes.
+
+### Stage 2: The Data Flow into AI
+
+Each scanner's `raw_output` dict is serialized to JSON and sent to Claude. The key design decision is what goes into `raw_output`. The scanner doesn't filter or pre-interpret — it collects everything that could be relevant and lets the AI decide what matters:
+
+```
+network scanner raw_output = {
+    "hostname": "myserver",
+    "interfaces": [...],          ← ip addr output
+    "open_ports_ss": "...",       ← ss -tlnpu output
+    "nmap_localhost": {"xml": "..."}, ← full nmap XML
+    "nmap_primary": {"xml": "..."},
+    "firewall_iptables": {...},   ← all three tables
+    "firewall_ufw": {...},
+    "ipv6_interfaces": "...",
+    "routing_table": "...",
+    "dns_config": "...",
+    "hosts_file": "..."
+}
+```
+
+This gets serialized, truncated to ~80,000 characters if needed, and wrapped in the analysis prompt. The AI returns structured JSON with findings, a risk score, and a module summary. Those are deserialized back into `Finding` dataclasses and attached to the `ModuleResult`.
+
+The eight per-module AI calls run concurrently using `ThreadPoolExecutor` — they are independent API calls with no shared state. On a typical run this takes 60–120 seconds total.
+
+### Stage 3: Synthesis and Report Assembly
+
+After all modules have AI-annotated findings, a second AI call performs cross-module synthesis. This is where the tool's real value emerges: the synthesis prompt receives all findings from all modules at once and is explicitly asked to identify **attack chains** — sequences of findings that chain together into a real exploit path.
+
+The synthesis produces:
+
+- `overall_risk_rating` + `overall_risk_score` — a single risk verdict for the host
+- `attack_chains` — 2–5 multi-step attack scenarios grounded in the actual findings
+- `top_10_priorities` — finding IDs ranked by real exploitability on *this* host, not generic severity
+- `executive_summary` — non-technical prose for a system owner
+- `recommended_immediate_actions` — ordered action list
+
+Everything assembles into a single `Report` dataclass which is then rendered to HTML and Markdown in parallel:
+
+```python
+@dataclass
+class Report:
+    hostname: str
+    scan_timestamp: str
+    os_info: dict
+    module_results: list[ModuleResult]   # all 9 modules
+    attack_chains: list[AttackChain]     # from synthesis
+    top_priorities: list[str]            # finding IDs
+    overall_risk_score: int              # 0–100
+    overall_risk_rating: str             # CRITICAL/HIGH/MEDIUM/LOW
+    executive_summary: str
+    lynis_score: int | None
+    recommended_actions: list[str]
+    all_findings: list[Finding]          # flattened, populated post-init
+```
+
+### Component Map
+
+```
+assessment/
+├── cli.py          Entry point. Parses args, orchestrates all three stages,
+│                   prints the summary table to stdout.
+│
+├── config.py       Single source of truth for all paths (HOST_ROOT prefix),
+│                   sysctl baselines, known-safe SUID list, dangerous packages.
+│
+├── models.py       Pure data: Finding, ModuleResult, AttackChain, Report.
+│                   No business logic. Safe to import anywhere.
+│
+├── runner.py       Stage 1 orchestration. Validates mounts, collects host
+│                   context (OS, kernel, hostname), runs scanners in parallel.
+│
+├── scanners/
+│   ├── base.py     Abstract BaseScanner with error isolation + timing.
+│   └── *.py        One file per module. Each implements _scan() only.
+│                   No AI, no reporting, no cross-module awareness.
+│
+├── ai/
+│   ├── client.py   Anthropic SDK wrapper. Handles retries, rate limits,
+│   │               JSON parsing, and stripping markdown code fences.
+│   ├── prompts.py  All prompt templates in one place. The single file
+│   │               to edit when tuning AI analysis quality.
+│   └── analyzer.py Stage 2 orchestration. Runs per-module analysis in
+│                   parallel, then runs synthesis. Builds the Report.
+│
+└── reports/
+    ├── html.py     Self-contained HTML renderer. Inline CSS + JS, no CDN.
+    └── markdown.py Markdown renderer for archiving and plain-text sharing.
+```
 
 ---
 
