@@ -1,6 +1,6 @@
 import json
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 from assessment.models import ModuleResult, Finding, AttackChain, Report
 from assessment.ai.client import AIClient
 from assessment.ai.prompts import MODULE_ANALYSIS_PROMPT, SYNTHESIS_PROMPT
@@ -8,7 +8,8 @@ from assessment.config import SEVERITY_ORDER
 
 logger = logging.getLogger(__name__)
 
-MAX_SCAN_OUTPUT_CHARS = 80_000  # ~20k tokens
+MAX_SCAN_OUTPUT_CHARS = 40_000  # keep prompts small to avoid truncated JSON
+INTER_REQUEST_DELAY = 3  # seconds between API calls (Tier 1 rate limit)
 
 
 class Analyzer:
@@ -17,22 +18,19 @@ class Analyzer:
         self.host_context = host_context
 
     def analyze_modules(self, module_results: list[ModuleResult]) -> list[ModuleResult]:
-        """Run per-module AI analysis in parallel."""
+        """Run per-module AI analysis sequentially to respect Tier 1 rate limits."""
         updated = []
 
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            future_to_module = {
-                executor.submit(self._analyze_module, mr): mr
-                for mr in module_results
-                if not mr.error
-            }
-            for future in as_completed(future_to_module):
-                original = future_to_module[future]
-                try:
-                    updated.append(future.result())
-                except Exception as e:
-                    logger.error(f"Module analysis failed for {original.module_name}: {e}")
-                    updated.append(original)
+        to_analyze = [mr for mr in module_results if not mr.error]
+        for i, mr in enumerate(to_analyze):
+            try:
+                updated.append(self._analyze_module(mr))
+            except Exception as e:
+                logger.error(f"Module analysis failed for {mr.module_name}: {e}")
+                updated.append(mr)
+            # Pause between calls except after the last one
+            if i < len(to_analyze) - 1:
+                time.sleep(INTER_REQUEST_DELAY)
 
         # Add errored modules as-is
         errored = [mr for mr in module_results if mr.error]

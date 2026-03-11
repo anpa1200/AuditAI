@@ -7,8 +7,8 @@ from assessment.ai.prompts import SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
-MAX_RETRIES = 3
-RETRY_DELAY = 5  # seconds
+MAX_RETRIES = 4
+RETRY_DELAY = 15  # seconds — base delay for rate limit backoff (Tier 1 accounts)
 
 # Error messages that are permanent — no point retrying
 _FATAL_PHRASES = (
