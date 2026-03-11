@@ -4,6 +4,7 @@ import time
 from assessment.models import ModuleResult, Finding, AttackChain, Report
 from assessment.ai.client import AIClient
 from assessment.ai.prompts import MODULE_ANALYSIS_PROMPT, SYNTHESIS_PROMPT
+from assessment.ai.preprocessor import preprocess
 from assessment.config import SEVERITY_ORDER
 
 logger = logging.getLogger(__name__)
@@ -45,7 +46,14 @@ class Analyzer:
     def _analyze_module(self, mr: ModuleResult) -> ModuleResult:
         logger.info(f"AI analyzing module: {mr.module_name}")
 
-        scan_json = json.dumps(mr.raw_output, indent=2, default=str)
+        filtered = preprocess(mr.module_name, mr.raw_output)
+        scan_json = json.dumps(filtered, indent=2, default=str)
+        original_size = len(json.dumps(mr.raw_output, default=str))
+        filtered_size = len(scan_json)
+        logger.debug(
+            f"{mr.module_name}: raw={original_size} chars → filtered={filtered_size} chars "
+            f"({100 - int(filtered_size / max(original_size, 1) * 100)}% reduction)"
+        )
         if len(scan_json) > MAX_SCAN_OUTPUT_CHARS:
             scan_json = scan_json[:MAX_SCAN_OUTPUT_CHARS] + "\n... [truncated]"
 
