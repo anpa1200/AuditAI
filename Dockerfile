@@ -58,4 +58,3 @@ RUN mkdir -p /output
 USER root
 
 ENTRYPOINT ["/opt/venv/bin/python", "-m", "assessment.cli"]
-CMD ["--help"]
