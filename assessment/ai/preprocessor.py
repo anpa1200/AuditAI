@@ -235,19 +235,31 @@ def _process_os_hardening(raw: dict) -> dict:
 def _process_services(raw: dict) -> dict:
     out = {}
 
-    # Systemd units: keep failed + enabled listening services
+    # Systemd units: keep failed (active=="failed" or sub=="failed") + count enabled
     units = raw.get("systemd_units", [])
     if isinstance(units, list):
-        out["failed_units"] = [u for u in units if u.get("state") == "failed"]
+        out["failed_units"] = [
+            u for u in units
+            if u.get("active") == "failed" or u.get("sub") == "failed"
+        ]
         out["enabled_unit_count"] = len([u for u in units if u.get("enabled")])
+        out["total_unit_count"] = len(units)
     else:
         out["systemd_units"] = _trim(str(units), 60)
 
+    out["systemd_failed"] = raw.get("systemd_failed", [])
+
+    # Docker socket — always keep (critical if world-readable)
+    out["docker_socket"] = raw.get("docker_socket", {})
+
+    # Cron: trim large files but keep structure
+    cron = raw.get("cron_jobs", {})
+    out["cron_jobs"] = {k: _trim(v, 30) for k, v in cron.items()} if isinstance(cron, dict) else cron
+
     # Pass through smaller fields
-    for k in ("cron_jobs", "docker_socket", "inetd_services",
-               "systemd_timers", "listening_services"):
+    for k in ("inetd_xinetd", "at_jobs", "init_scripts", "timers", "listening_processes"):
         if k in raw:
-            out[k] = raw[k]
+            out[k] = _trim(raw[k], 30) if isinstance(raw[k], str) else raw[k]
 
     return out
 

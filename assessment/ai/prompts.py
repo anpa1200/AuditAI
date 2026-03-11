@@ -22,7 +22,10 @@ Hostname: {hostname}
 RAW SCAN DATA:
 {scan_output}
 
-Identify security findings. Output a JSON object with this exact schema:
+Identify security findings. Return at most 12 findings — prioritise by severity, merge duplicates.
+Keep each field concise: description ≤ 2 sentences, evidence ≤ 1 line, remediation ≤ 1 command.
+
+Output a JSON object with this exact schema:
 {{
   "findings": [
     {{
@@ -30,9 +33,9 @@ Identify security findings. Output a JSON object with this exact schema:
       "title": "Short descriptive title",
       "severity": "CRITICAL|HIGH|MEDIUM|LOW|INFO",
       "category": "{module_name}",
-      "description": "What the issue is and why it matters",
-      "evidence": "Exact values/paths from the scan data",
-      "remediation": "Specific command or config change to fix this",
+      "description": "What the issue is and why it matters (≤2 sentences)",
+      "evidence": "Exact values/paths from the scan data (≤1 line)",
+      "remediation": "Specific command or config change (≤1 line)",
       "references": []
     }}
   ],

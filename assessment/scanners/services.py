@@ -26,6 +26,8 @@ class ServicesScanner(BaseScanner):
 
 
 def _get_systemd_units() -> list[dict]:
+    """List systemd service units via systemctl, falling back to filesystem scan
+    when running inside a Docker container where systemctl is unavailable."""
     try:
         out = subprocess.check_output(
             ["systemctl", "list-units", "--type=service", "--all",
@@ -45,8 +47,68 @@ def _get_systemd_units() -> list[dict]:
                 })
         return units
     except Exception as e:
-        logger.warning(f"systemctl list-units failed: {e}")
-        return []
+        logger.warning(f"systemctl list-units failed: {e} — reading unit files from host filesystem")
+        return _get_systemd_units_from_fs()
+
+
+def _get_systemd_units_from_fs() -> list[dict]:
+    """Read installed systemd unit files from host filesystem (Docker fallback)."""
+    from assessment.config import HOST_ROOT
+    units = []
+    seen: set = set()
+
+    # Unit file locations (prefer host-mounted paths)
+    dirs_relative = [
+        "etc/systemd/system",
+        "lib/systemd/system",
+        "usr/lib/systemd/system",
+    ]
+    search_dirs = [
+        os.path.join(HOST_ROOT, d) if HOST_ROOT else os.path.join("/", d)
+        for d in dirs_relative
+    ]
+
+    # Detect enabled units via .wants/ symlink directories
+    enabled_units: set = set()
+    for base in search_dirs:
+        for wants_dir in glob.glob(os.path.join(base, "*.wants")):
+            try:
+                for entry in os.listdir(wants_dir):
+                    enabled_units.add(entry)
+            except Exception:
+                pass
+
+    # Enumerate .service files
+    for search_dir in search_dirs:
+        if not os.path.isdir(search_dir):
+            continue
+        try:
+            for fname in os.listdir(search_dir):
+                if not fname.endswith(".service") or fname in seen:
+                    continue
+                seen.add(fname)
+                units.append({
+                    "unit": fname,
+                    "load": "loaded",
+                    "active": "unknown",
+                    "sub": "unknown",
+                    "enabled": fname in enabled_units,
+                })
+        except Exception as e:
+            logger.debug(f"Could not list {search_dir}: {e}")
+
+    # Try to detect active units from runtime state
+    run_units = os.path.join(HOST_ROOT, "run/systemd/units") if HOST_ROOT else "/run/systemd/units"
+    if os.path.isdir(run_units):
+        try:
+            active_names = {f for f in os.listdir(run_units) if f.endswith(".service")}
+            for u in units:
+                if u["unit"] in active_names:
+                    u["active"] = "active"
+        except Exception:
+            pass
+
+    return units
 
 
 def _get_failed_units() -> list[str]:
@@ -157,11 +219,23 @@ def _get_init_scripts() -> list[str]:
         return []
 
 
-def _get_systemd_timers() -> str:
+def _get_systemd_timers() -> list[str]:
     try:
-        return subprocess.check_output(
+        out = subprocess.check_output(
             ["systemctl", "list-timers", "--all", "--no-pager"],
             text=True, timeout=10
         )
+        return out.strip().splitlines()
     except Exception:
-        return ""
+        # Fallback: find .timer unit files on host filesystem
+        from assessment.config import HOST_ROOT
+        timers = []
+        dirs_relative = ["etc/systemd/system", "lib/systemd/system", "usr/lib/systemd/system"]
+        for rel in dirs_relative:
+            d = os.path.join(HOST_ROOT, rel) if HOST_ROOT else os.path.join("/", rel)
+            if os.path.isdir(d):
+                try:
+                    timers += [f for f in os.listdir(d) if f.endswith(".timer")]
+                except Exception:
+                    pass
+        return timers

@@ -66,7 +66,7 @@ class Analyzer:
             scan_output=scan_json,
         )
 
-        response = self.client.analyze(prompt, max_tokens=4096)
+        response = self.client.analyze(prompt, max_tokens=8192)
 
         findings = []
         for f in response.get("findings", []):
