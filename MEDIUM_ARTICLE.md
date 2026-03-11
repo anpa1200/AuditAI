@@ -17,12 +17,13 @@ That's exactly what I built. This article walks through the architecture, design
 3. [Architecture Overview](#architecture-overview)
 4. [The Nine Scanner Modules](#the-nine-scanner-modules)
 5. [The AI Layer](#the-ai-layer)
-6. [The Report](#the-report)
-7. [What It Found on My Machine](#what-it-found-on-my-machine)
-8. [Security Considerations](#security-considerations)
-9. [Extending the Tool](#extending-the-tool)
-10. [What's Next](#whats-next)
-11. [Conclusion](#conclusion)
+6. [Handling API Errors Gracefully](#handling-api-errors-gracefully)
+7. [The Report](#the-report)
+8. [What It Found on My Machine](#what-it-found-on-my-machine)
+9. [Security Considerations](#security-considerations)
+10. [Extending the Tool](#extending-the-tool)
+11. [What's Next](#whats-next)
+12. [Conclusion](#conclusion)
 
 ---
 
@@ -381,27 +382,44 @@ All results are collected before Stage 2 begins. If lynis is skipped via `--skip
 
 ### Stage 2: The Data Flow into AI
 
-Each scanner's `raw_output` dict is serialized to JSON and sent to Claude. The key design decision is what goes into `raw_output`. The scanner doesn't filter or pre-interpret — it collects everything that could be relevant and lets the AI decide what matters:
+Scanners collect raw data indiscriminately — everything that could be relevant ends up in `raw_output`. Before any of that reaches Claude, it passes through a **preprocessor** that filters and compresses each module's output:
 
 ```
-network scanner raw_output = {
-    "hostname": "myserver",
-    "interfaces": [...],          ← ip addr output
-    "open_ports_ss": "...",       ← ss -tlnpu output
-    "nmap_localhost": {"xml": "..."}, ← full nmap XML
-    "nmap_primary": {"xml": "..."},
-    "firewall_iptables": {...},   ← all three tables
-    "firewall_ufw": {...},
-    "ipv6_interfaces": "...",
-    "routing_table": "...",
-    "dns_config": "...",
-    "hosts_file": "..."
-}
+network scanner raw_output (before):              network scanner input (after):
+{                                                 {
+    "nmap_localhost": {"xml": "...3000 lines"},       "nmap_localhost": {
+    "interfaces": [...full ip addr JSON...],               "open_ports": [
+    "firewall_iptables": {"filter": "..."},                    {"port": 22, "service": "ssh"},
+    "open_ports_ss": "Netid State...",                         {"port": 80, "service": "http"}
+    ...                                                    ]
+}  ← ~85,000 chars                                    },
+                                                      "firewall_iptables": {
+                                                          "filter": {
+                                                              "rule_count": 3,
+                                                              "default_accept_policy": true
+                                                          }
+                                                      },
+                                                      ...
+                                                  }  ← ~8,000 chars  (90% smaller)
 ```
 
-This gets serialized, truncated to ~80,000 characters if needed, and wrapped in the analysis prompt. The AI returns structured JSON with findings, a risk score, and a module summary. Those are deserialized back into `Finding` dataclasses and attached to the `ModuleResult`.
+The preprocessor applies different logic per module:
 
-The eight per-module AI calls run concurrently using `ThreadPoolExecutor` — they are independent API calls with no shared state. On a typical run this takes 60–120 seconds total.
+| Module | What gets dropped | What stays |
+|--------|-------------------|------------|
+| `processes` | 200-entry raw process table | Suspicious, root (deduped by name), privileged, tmp processes |
+| `packages` | Full list of 400+ installed packages | CVE findings, dangerous packages, upgrade count |
+| `filesystem` | All known-safe SUID binaries | Unknown SUID only, risky world-writable dirs (no sticky bit) |
+| `network` | Raw nmap XML (3,000+ lines) | Parsed open ports list; iptables summarized to rule count + policy |
+| `os_hardening` | All compliant sysctl parameters | Only the non-compliant ones |
+| `kernel` | Mitigated/not-affected CPU vulns | Only unmitigated vulnerabilities |
+| `users` | Service accounts without login shells | Real login users + root |
+
+This reduces prompt size 60–90%, which has two concrete benefits: Claude never hits token limits mid-response (eliminating JSON truncation errors), and each API call costs significantly less.
+
+The filtered output is serialized to JSON and wrapped in the analysis prompt. The AI returns structured JSON with findings, a risk score, and a module summary. Those are deserialized back into `Finding` dataclasses and attached to the `ModuleResult`.
+
+Per-module AI calls run **sequentially** with a small delay between each. Running them in parallel triggers rate limits on Anthropic Tier 1 accounts (the $5 entry level). Sequential execution is slightly slower but completes reliably on any account tier.
 
 ### Stage 3: Synthesis and Report Assembly
 
@@ -456,12 +474,14 @@ assessment/
 │                   No AI, no reporting, no cross-module awareness.
 │
 ├── ai/
-│   ├── client.py   Anthropic SDK wrapper. Handles retries, rate limits,
-│   │               JSON parsing, and stripping markdown code fences.
-│   ├── prompts.py  All prompt templates in one place. The single file
-│   │               to edit when tuning AI analysis quality.
-│   └── analyzer.py Stage 2 orchestration. Runs per-module analysis in
-│                   parallel, then runs synthesis. Builds the Report.
+│   ├── client.py      Anthropic SDK wrapper. Handles retries, rate limits,
+│   │                  JSON parsing, billing errors, and code fence stripping.
+│   ├── preprocessor.py Filters and compresses raw scanner output before AI.
+│   │                  Reduces prompt size 60–90% per module.
+│   ├── prompts.py     All prompt templates in one place. Edit this to tune
+│   │                  AI analysis quality or finding verbosity.
+│   └── analyzer.py    Stage 2 orchestration. Preprocesses data, runs
+│                      per-module analysis sequentially, then synthesis.
 │
 └── reports/
     ├── html.py     Self-contained HTML renderer. Inline CSS + JS, no CDN.
@@ -529,6 +549,17 @@ def _check_docker_socket() -> dict:
             "world_readable": bool(st.st_mode & 0o006),  # Critical if True
         }
 ```
+
+An interesting Docker-specific challenge: `systemctl` is not available inside the container because it communicates with `systemd` over D-Bus, and the host's D-Bus session isn't shared into the container. The scanner handles this gracefully — it tries `systemctl` first, and if unavailable, reads `.service` unit files directly from the host filesystem:
+
+```
+/host/lib/systemd/system/     ← package-installed services
+/host/etc/systemd/system/     ← user-modified services
+/host/usr/lib/systemd/system/ ← system services
+/host/etc/systemd/system/*.wants/ ← symlinks reveal which are enabled
+```
+
+This means the services scanner works correctly even inside a minimal Docker container with no init system.
 
 ### Module 3: OS Hardening
 
@@ -640,34 +671,31 @@ This is where the tool differentiates from a plain script. There are two analysi
 
 ### Pass 1: Per-Module Analysis
 
-Each module's raw output is sent to Claude with this prompt structure:
+Each module's preprocessed output is sent to Claude. The prompt explicitly constrains output size to prevent response truncation:
 
 ```
-Analyze the following {module_name} scan results from a Linux host
-security assessment.
+Analyze the following {module_name} scan results.
 
-HOST CONTEXT:
-OS: Ubuntu 24.04.2 LTS
-Kernel: 6.8.0-49-generic
-Hostname: myserver
+HOST CONTEXT: OS, kernel, hostname...
 
 RAW SCAN DATA:
-{json_dump_of_scanner_output}
+{preprocessed_json}
 
-Identify security findings. For each finding output JSON:
+Return at most 12 findings — prioritise by severity, merge duplicates.
+Keep each field concise: description ≤ 2 sentences, evidence ≤ 1 line,
+remediation ≤ 1 command.
+
+Output JSON:
 {
-  "id": "unique_snake_case_id",
-  "title": "Short descriptive title",
-  "severity": "CRITICAL|HIGH|MEDIUM|LOW|INFO",
-  "description": "What the issue is and why it matters",
-  "evidence": "Exact values/paths from the scan data",
-  "remediation": "Specific command or config change to fix this"
+  "findings": [...],
+  "module_risk_score": 0-100,
+  "module_summary": "2-3 sentences"
 }
 ```
 
-Temperature is set to 0 for deterministic, consistent findings. The `evidence` field is crucial — it forces the model to ground every finding in actual data from the scan, preventing hallucinated findings.
+Temperature is set to 0 for deterministic, consistent findings. The `evidence` field is crucial — it forces the model to ground every finding in actual data from the scan, preventing hallucinated findings. The 12-finding cap and conciseness constraints ensure the response always fits within `max_tokens=8192`.
 
-These per-module calls run concurrently using `ThreadPoolExecutor` since they're independent API calls.
+Calls are made sequentially with a short inter-request delay, which keeps the tool well within Anthropic's rate limits on Tier 1 accounts.
 
 ### Pass 2: Synthesis
 
@@ -679,6 +707,27 @@ After all modules are analyzed, a synthesis prompt combines all findings and ask
 4. **Overall risk rating** — CRITICAL/HIGH/MEDIUM/LOW with justification
 
 The attack chain analysis is the most valuable output. It identifies combinations like: *"The nginx service (finding: exposed\_http\_service) runs as root (finding: nginx\_root\_process), and there is a known CVE in the installed nginx version (finding: nginx\_cve\_2024\_xxxx). A remote attacker exploiting the CVE would gain immediate root access."*
+
+### Handling API Errors Gracefully
+
+Running nine AI calls in sequence means there are multiple opportunities for transient failures. The tool handles them distinctly:
+
+**Rate limits (429):** Backed off with exponential delay and retried up to 4 times. Base delay is 15 seconds, so the backoff sequence is 15s → 30s → 60s → 120s. This is generous enough for Tier 1 accounts which reset limits per minute.
+
+**Insufficient credits (400):** Detected immediately by matching the error message against known billing phrases. No retry — retrying a billing error is pointless and wastes time. Instead, the tool stops with a clear message:
+
+```
+ERROR: Anthropic API rejected the request due to insufficient credits.
+  → Check your balance at https://console.anthropic.com/settings/billing
+  → If you just topped up, wait a few minutes for credits to propagate.
+  → Re-run with --no-ai to get scanner-only output while you resolve billing.
+```
+
+Note: there is often a 5–30 minute delay after first purchasing API credits before the API accepts requests. The scanner-only output (`--no-ai`) is fully useful on its own while waiting.
+
+**JSON decode errors:** If a response can't be parsed as JSON (rare but possible if the model produces unexpected output), the tool retries with the same prompt. On final failure it records an empty findings list for that module rather than aborting the run.
+
+**Scanner failures:** If an individual scanner crashes — nmap timeout, permission denied, missing binary — it records the error in `ModuleResult.error` and the run continues. The final report marks the failed module clearly.
 
 ---
 
