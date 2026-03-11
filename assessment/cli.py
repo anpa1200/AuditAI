@@ -7,7 +7,7 @@ import click
 from assessment.config import ANTHROPIC_API_KEY, DEFAULT_MODEL, OUTPUT_DIR
 from assessment.scanners import ALL_SCANNERS
 from assessment.runner import validate_host_mounts, collect_host_context, run_scanners, get_scan_timestamp
-from assessment.ai.client import AIClient
+from assessment.ai.client import AIClient, InsufficientCreditsError
 from assessment.ai.analyzer import Analyzer, build_report
 from assessment.reports.markdown import generate_markdown
 from assessment.reports.html import generate_html
@@ -29,7 +29,7 @@ from assessment.config import SEVERITY_ORDER
               help="Claude model to use")
 @click.option("--no-ai", is_flag=True, default=False,
               help="Skip AI analysis (scanners only)")
-@click.option("--severity", default="LOW",
+@click.option("--severity", default="INFO",
               type=click.Choice(["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]),
               help="Minimum severity to include in report")
 @click.option("--verbose", "-v", is_flag=True, default=False,
@@ -106,11 +106,19 @@ def main(modules, skip, output_dir, fmt, model, no_ai, severity, verbose):
         client = AIClient(model=model, api_key=api_key)
         analyzer = Analyzer(client=client, host_context=host_context)
 
-        click.echo("  Analyzing modules...")
-        module_results = analyzer.analyze_modules(module_results)
+        try:
+            click.echo("  Analyzing modules...")
+            module_results = analyzer.analyze_modules(module_results)
 
-        click.echo("  Running synthesis...")
-        synthesis = analyzer.synthesize(module_results)
+            click.echo("  Running synthesis...")
+            synthesis = analyzer.synthesize(module_results)
+        except InsufficientCreditsError as e:
+            click.echo(click.style(f"\nERROR: {e}", fg="red"))
+            click.echo(click.style(
+                "\nScanner data was collected. Re-run with --no-ai to generate a report from raw findings.",
+                fg="yellow"
+            ))
+            sys.exit(1)
     else:
         click.echo(click.style("\n► Skipping AI analysis (--no-ai)", fg="yellow"))
         synthesis = {
