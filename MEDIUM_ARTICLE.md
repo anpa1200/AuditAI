@@ -43,38 +43,206 @@ The tool I built — **AuditAI** — runs nine scanner modules in parallel, feed
 
 ## Getting Started
 
-**Prerequisites:** Docker, an Anthropic API key, and a Linux host.
+### Step 1: Install Docker
+
+AuditAI runs entirely inside Docker — no Python, nmap, or lynis installation required on your host.
+
+**Ubuntu / Debian:**
+
+```bash
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+newgrp docker          # apply group change without logout
+docker --version       # verify
+```
+
+**Fedora / RHEL / Rocky:**
+
+```bash
+sudo dnf install -y docker-ce docker-ce-cli containerd.io
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+**Arch:**
+
+```bash
+sudo pacman -S docker
+sudo systemctl enable --now docker
+sudo usermod -aG docker $USER
+```
+
+> **Note:** Adding your user to the `docker` group grants effective root access to the host. This is standard Docker practice and required for AuditAI to work without `sudo`.
+
+---
+
+### Step 2: Get an Anthropic API Key
+
+AuditAI uses Claude to analyze scanner output and generate findings. You need an API key from Anthropic.
+
+1. Go to [console.anthropic.com](https://console.anthropic.com/)
+2. Sign up or log in
+3. Navigate to **API Keys** → **Create Key**
+4. Copy the key — it starts with `sk-ant-`
+
+The key is only used inside the container and is never written to disk or included in any report. If you prefer not to send data to the API, the `--no-ai` flag runs all scanners and produces a raw report without any external calls.
+
+---
+
+### Step 3: Clone and Run
 
 ```bash
 git clone https://github.com/anpa1200/AuditAI.git
 cd AuditAI
+```
 
+Set your API key and launch:
+
+```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 ./run.sh
 ```
 
-The script will:
+That's the entire installation. There is no `pip install`, no virtualenv, no dependency management on your side — everything is baked into the Docker image.
 
-1. Build the Docker image
-2. Show you exactly what host access it will request
-3. Ask for confirmation before running
-4. Write reports to `./output/`
+---
 
-**Common options:**
+### What Happens When You Run It
+
+`run.sh` walks you through three steps before touching your system:
+
+**1. Image build** (first run only, ~2–3 minutes)
+
+```
+► Building Docker image...
+  Image built: auditai:latest
+```
+
+On subsequent runs the image is cached and this step takes under a second.
+
+**2. Consent prompt** — it shows you exactly what host access it will request and asks for confirmation:
+
+```
+┌─────────────────────────────────────────────────────┐
+│  This tool will run with the following host access:  │
+│  • --pid=host     (read host process table)          │
+│  • --network=host (use host network namespace)       │
+│  • -v /:/host:ro  (read host filesystem)             │
+│  • CAP_NET_RAW, CAP_NET_ADMIN (nmap SYN scans)       │
+│  • CAP_SYS_PTRACE (read /proc/<pid>/exe)             │
+│                                                       │
+│  All mounts are READ-ONLY. No changes to host.       │
+└─────────────────────────────────────────────────────┘
+
+Proceed with assessment? (y/N):
+```
+
+**3. Assessment runs** — you see live progress as each module completes:
+
+```
+► Running 9 scanner modules...
+  Modules: network, services, os_hardening, users, processes,
+           filesystem, kernel, packages, lynis
+
+  ✓ network              12.3s
+  ✓ services              3.1s
+  ✓ os_hardening          1.8s
+  ✓ users                 2.4s
+  ✓ processes             8.7s
+  ✓ filesystem           31.2s
+  ✓ kernel                1.1s
+  ✓ packages             18.9s
+  ✓ lynis               247.6s
+
+► Running AI analysis (Claude)...
+  Analyzing modules...
+  Running synthesis...
+
+► Generating reports...
+  HTML:     ./output/report_2026-03-11T08-22-01Z.html
+  Markdown: ./output/report_2026-03-11T08-22-01Z.md
+```
+
+**4. Summary printed to terminal:**
+
+```
+╔══════════════════ SUMMARY ══════════════════╗
+  Overall Risk: HIGH (67/100)
+  Lynis Hardening Index: 58/100
+  Findings:
+    3 Critical  11 High  24 Medium  18 Low
+
+  Top Action: Disable PasswordAuthentication in /etc/ssh/sshd_config
+╚══════════════════════════════════════════════╝
+```
+
+---
+
+### Reading the Report
+
+Open `./output/report_*.html` in any browser. No internet connection required — the file is fully self-contained.
+
+The report is structured from most to least actionable:
+
+- **Overall risk badge** at the top — CRITICAL / HIGH / MEDIUM / LOW with a 0–100 score
+- **Immediate actions** — the 3–5 things to fix today, in order
+- **Attack chains** — how individual findings chain into real exploits on *your specific host*
+- **Top 10 priorities** — findings ranked by actual exploitability, not just severity label
+- **Module sections** — collapsible, each with a risk score and all findings with evidence and remediation commands
+- **Findings table** — filterable by severity (click the severity buttons at the top)
+
+The Markdown report (`report_*.md`) contains the same content and is useful for pasting into tickets, committing to a private repo, or sharing over encrypted channels.
+
+---
+
+### Common Usage Patterns
+
+**Fast scan — skip lynis, no AI** (~2 minutes, no API calls):
 
 ```bash
-# Skip lynis (saves ~5 minutes on first run)
-./run.sh --skip lynis
+./run.sh --skip lynis --no-ai
+```
 
-# Only scan network and users, no AI analysis
-./run.sh --modules network,users --no-ai
+Useful for a quick check during development or when you just want raw scanner output.
 
-# Only show HIGH and above findings
+**Network and user audit only:**
+
+```bash
+./run.sh --modules network,users,services
+```
+
+Scans only the three specified modules, useful when you've already fixed filesystem and kernel findings and want to recheck access controls.
+
+**Only show actionable findings:**
+
+```bash
 ./run.sh --severity HIGH
+```
 
-# Use a specific Claude model
+Filters the report to HIGH and CRITICAL only. Useful when you have many LOW/INFO findings you've already acknowledged.
+
+**Use a more powerful model for deeper analysis:**
+
+```bash
 ./run.sh --model claude-opus-4-6
 ```
+
+Claude Opus produces more detailed attack chain reasoning and longer remediation explanations. Costs more per run but worthwhile for a quarterly deep-dive.
+
+**Run without the launcher script** (Docker Compose):
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-... docker compose run assessment --skip lynis
+```
+
+**Run directly on the host** (no Docker, development mode):
+
+```bash
+HOST_ROOT="" python3 -m assessment.cli --modules kernel,os_hardening --no-ai
+```
+
+Setting `HOST_ROOT=""` makes all paths resolve to `/` instead of `/host`, so the scanners read your real system directly. Useful when iterating on a scanner module without rebuilding the image.
 
 ---
 
