@@ -4,7 +4,9 @@ ARG DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     HOST_ROOT=/host \
-    OUTPUT_DIR=/output
+    OUTPUT_DIR=/output \
+    VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:$PATH"
 
 # Install system security tools and Python
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -38,10 +40,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
+# Create venv (required on Ubuntu 24.04 / Python 3.12 — PEP 668)
+RUN python3 -m venv /opt/venv
+
+# Install Python dependencies into venv
 WORKDIR /app
 COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY assessment/ ./assessment/
@@ -52,5 +57,5 @@ RUN mkdir -p /output
 # Run as root (required for raw socket nmap scans and /proc reads)
 USER root
 
-ENTRYPOINT ["python3", "-m", "assessment.cli"]
+ENTRYPOINT ["/opt/venv/bin/python", "-m", "assessment.cli"]
 CMD ["--help"]
