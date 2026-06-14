@@ -1,0 +1,28 @@
+.TH AUDITAI 1 "June 2026" "auditai 1.0.0" "User Commands"
+.SH NAME
+auditai \- assess Linux host vulnerability and hardening posture
+.SH SYNOPSIS
+.B auditai
+.RI [ options ]
+.SH DESCRIPTION
+AuditAI runs local Linux security scanners and creates HTML or Markdown
+reports. AI synthesis is optional.
+.SH OPTIONS
+.TP
+.B \-\-no-ai
+Run scanners and create reports without an AI API key.
+.TP
+.BR \-\-modules " " LIST
+Run a comma-separated subset of scanner modules.
+.TP
+.BR \-\-skip " " LIST
+Skip comma-separated scanner modules.
+.TP
+.BR \-\-output-dir " " DIR
+Write reports to DIR.
+.SH EXAMPLE
+.B sudo auditai --no-ai --output-dir ./output
+.SH AUTHOR
+Andrey Pautov <1200km@gmail.com>
+.SH LICENSE
+MIT

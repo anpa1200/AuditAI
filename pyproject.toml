@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "auditai"
+version = "1.0.0"
+description = "Linux host vulnerability assessment with optional AI analysis."
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Andrey Pautov", email = "1200km@gmail.com" }]
+requires-python = ">=3.10"
+dependencies = ["click>=8.1", "requests>=2.31"]
+keywords = ["host-audit", "linux-security", "vulnerability-assessment"]
+
+[project.optional-dependencies]
+ai = ["anthropic>=0.40"]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+auditai = "assessment.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/anpa1200/AuditAI"
+Documentation = "https://medium.com/@1200km/building-a-dockerized-ai-powered-host-vulnerability-assessment-tool-cd6e2147ce59"
+Repository = "https://github.com/anpa1200/AuditAI"
+
+[tool.setuptools.packages.find]
+include = ["assessment*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"

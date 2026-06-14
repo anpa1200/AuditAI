@@ -7,15 +7,16 @@ import click
 from assessment.config import ANTHROPIC_API_KEY, DEFAULT_MODEL, OUTPUT_DIR
 from assessment.scanners import ALL_SCANNERS
 from assessment.runner import validate_host_mounts, collect_host_context, run_scanners, get_scan_timestamp
-from assessment.ai.client import AIClient, InsufficientCreditsError
 from assessment.ai.analyzer import Analyzer, build_report
 from assessment.reports.markdown import generate_markdown
 from assessment.reports.html import generate_html
 from assessment.models import Report
 from assessment.config import SEVERITY_ORDER
+from assessment import __version__
 
 
 @click.command()
+@click.version_option(__version__)
 @click.option("--modules", default="all",
               help="Comma-separated modules to run (default: all)")
 @click.option("--skip", default="",
@@ -102,6 +103,8 @@ def main(modules, skip, output_dir, fmt, model, no_ai, severity, verbose):
 
     # AI Analysis
     if not no_ai:
+        from assessment.ai.client import AIClient, InsufficientCreditsError
+
         click.echo(click.style("\n► Running AI analysis (Claude)...", fg="blue"))
         client = AIClient(model=model, api_key=api_key)
         analyzer = Analyzer(client=client, host_context=host_context)

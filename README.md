@@ -56,6 +56,13 @@ The container mounts the host filesystem **read-only** and uses `--pid=host` + `
 - Linux host (Ubuntu/Debian recommended; other distros work)
 - [Anthropic API key](https://console.anthropic.com/) — ~$0.10–0.30 per full scan on Sonnet
 
+The installed `auditai` CLI can run directly on a Kali/Linux host without
+Docker or an API key:
+
+```bash
+sudo auditai --no-ai --output-dir ./output
+```
+
 ---
 
 ## Quick Start
@@ -80,6 +87,16 @@ export ANTHROPIC_API_KEY=sk-ant-...
 `run.sh` builds the image, shows you exactly what host access it requests, asks for confirmation, then writes reports to `./output/`.
 
 No `pip install`, no virtualenv, no dependency management on your side — everything is baked into the Docker image.
+
+## Kali Linux Submission
+
+The core package runs locally with `--no-ai`; Anthropic analysis is optional.
+Debian/Kali metadata is under [`debian/`](debian/), with a complete
+[New Tool Request draft](docs/kali-new-tool-request.md).
+
+## License
+
+[MIT](LICENSE)
 
 ---
 

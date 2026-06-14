@@ -2,7 +2,6 @@ import json
 import logging
 import time
 from assessment.models import ModuleResult, Finding, AttackChain, Report
-from assessment.ai.client import AIClient
 from assessment.ai.prompts import MODULE_ANALYSIS_PROMPT, SYNTHESIS_PROMPT
 from assessment.ai.preprocessor import preprocess
 from assessment.config import SEVERITY_ORDER
@@ -14,7 +13,7 @@ INTER_REQUEST_DELAY = 3  # seconds between API calls (Tier 1 rate limit)
 
 
 class Analyzer:
-    def __init__(self, client: AIClient, host_context: dict):
+    def __init__(self, client, host_context: dict):
         self.client = client
         self.host_context = host_context
 

@@ -1,0 +1,3 @@
+Test-Command: auditai --version && auditai --help
+Depends: @
+Restrictions: superficial

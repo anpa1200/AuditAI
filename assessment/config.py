@@ -1,6 +1,6 @@
 import os
 
-HOST_ROOT = os.environ.get("HOST_ROOT", "/host")
+HOST_ROOT = os.environ.get("HOST_ROOT", "/")
 PROC_PATH = f"{HOST_ROOT}/proc"
 SYS_PATH = f"{HOST_ROOT}/sys"
 ETC_PATH = f"{HOST_ROOT}/etc"
@@ -14,7 +14,7 @@ TMP_PATH = f"{HOST_ROOT}/tmp"
 BOOT_PATH = f"{HOST_ROOT}/boot"
 RUN_PATH = f"{HOST_ROOT}/run"
 
-OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "/output")
+OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "./output")
 
 DEFAULT_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")

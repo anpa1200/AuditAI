@@ -1,0 +1,38 @@
+Source: auditai
+Section: utils
+Priority: optional
+Maintainer: Andrey Pautov <1200km@gmail.com>
+Build-Depends:
+ debhelper-compat (= 13),
+ dh-python,
+ pybuild-plugin-pyproject,
+ python3-all,
+ python3-click,
+ python3-pytest,
+ python3-requests,
+ python3-setuptools
+Standards-Version: 4.7.0
+Homepage: https://github.com/anpa1200/AuditAI
+Vcs-Browser: https://github.com/anpa1200/AuditAI
+Vcs-Git: https://github.com/anpa1200/AuditAI.git
+Rules-Requires-Root: no
+
+Package: auditai
+Architecture: all
+Depends:
+ ${misc:Depends},
+ ${python3:Depends},
+ python3-click,
+ python3-requests
+Recommends:
+ auditd,
+ iproute2,
+ iptables,
+ libcap2-bin,
+ lynis,
+ nmap,
+ procps
+Description: Linux host vulnerability assessment with optional AI
+ AuditAI performs local Linux host vulnerability and hardening assessments.
+ It can produce reports without an API key using --no-ai; Anthropic-based
+ synthesis is an optional upstream integration.
