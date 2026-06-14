@@ -1,5 +1,11 @@
 # AuditAI
 
+[![PyPI](https://img.shields.io/pypi/v/1200km-auditai.svg)](https://pypi.org/project/1200km-auditai/)
+[![Python](https://img.shields.io/pypi/pyversions/1200km-auditai.svg)](https://pypi.org/project/1200km-auditai/)
+[![CI](https://github.com/anpa1200/AuditAI/actions/workflows/ci.yml/badge.svg)](https://github.com/anpa1200/AuditAI/actions/workflows/ci.yml)
+[![Publish](https://github.com/anpa1200/AuditAI/actions/workflows/publish.yml/badge.svg)](https://github.com/anpa1200/AuditAI/actions/workflows/publish.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 **AI-powered host vulnerability assessment tool running entirely inside Docker.**
 
 AuditAI runs nine security scanner modules against your Linux host, feeds the raw findings to Claude, and produces a prioritized vulnerability report with attack chain analysis — all from a single command.
@@ -60,12 +66,26 @@ The installed `auditai` CLI can run directly on a Kali/Linux host without
 Docker or an API key:
 
 ```bash
+pip install 1200km-auditai
 sudo auditai --no-ai --output-dir ./output
 ```
 
 ---
 
 ## Quick Start
+
+### PyPI CLI install
+
+```bash
+pip install 1200km-auditai
+auditai --help
+sudo auditai --no-ai --output-dir ./output
+```
+
+The PyPI distribution is named `1200km-auditai`; the installed command remains
+`auditai`.
+
+### Docker workflow
 
 **1. Install Docker** (if not already installed):
 
