@@ -1,0 +1,78 @@
+name: Kali submission status
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  monitor:
+    if: vars.KALI_BUG_ID != ''
+    runs-on: ubuntu-latest
+    env:
+      TRACKER_ISSUE: "1"
+      KALI_BUG_ID: ${{ vars.KALI_BUG_ID }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read Kali status
+        id: kali
+        run: python scripts/check_kali_status.py "$KALI_BUG_ID" --output "$GITHUB_OUTPUT"
+      - name: Detect status change
+        id: change
+        shell: bash
+        run: |
+          current="kali-status-${{ steps.kali.outputs.status_key }}"
+          previous="$(gh issue view "$TRACKER_ISSUE" --json labels --jq '.labels[].name' | grep '^kali-status-' || true)"
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+          if [[ "$current" != "$previous" ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Update tracker issue
+        if: steps.change.outputs.changed == 'true'
+        shell: bash
+        run: |
+          previous="${{ steps.change.outputs.previous }}"
+          if [[ -n "$previous" ]]; then
+            gh issue edit "$TRACKER_ISSUE" --remove-label "$previous"
+          fi
+          gh label create "${{ steps.change.outputs.current }}" --color 1D76DB --force
+          gh issue edit "$TRACKER_ISSUE" --add-label "${{ steps.change.outputs.current }}"
+          gh issue comment "$TRACKER_ISSUE" --body "$(cat <<EOF
+          Kali submission status changed.
+
+          - Status: **${{ steps.kali.outputs.status }}**
+          - Resolution: **${{ steps.kali.outputs.resolution }}**
+          - Outcome: **${{ steps.kali.outputs.outcome }}**
+          - Assigned to: ${{ steps.kali.outputs.assigned_to }}
+          - Kali update: ${{ steps.kali.outputs.last_modified }}
+          - Issue: ${{ steps.kali.outputs.url }}
+          EOF
+          )"
+      - name: Send status-change email
+        if: steps.change.outputs.changed == 'true'
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
+          EMAIL_SUBJECT: "[Kali] ${{ github.event.repository.name }}: ${{ steps.kali.outputs.status }} / ${{ steps.kali.outputs.resolution }}"
+          EMAIL_BODY: |
+            Kali submission status changed for ${{ github.event.repository.name }}.
+
+            Status: ${{ steps.kali.outputs.status }}
+            Resolution: ${{ steps.kali.outputs.resolution }}
+            Outcome: ${{ steps.kali.outputs.outcome }}
+            Assigned to: ${{ steps.kali.outputs.assigned_to }}
+            Last modified: ${{ steps.kali.outputs.last_modified }}
+            Issue: ${{ steps.kali.outputs.url }}
+        run: python scripts/send_status_email.py

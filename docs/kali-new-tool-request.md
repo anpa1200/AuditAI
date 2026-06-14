@@ -36,3 +36,6 @@ iproute2, iptables, libcap2-bin, procps.
 
 [Packaged] - Debian/Kali package metadata, autopkgtest, and a man page are
 included upstream.
+
+After Kali creates the issue, configure
+[status notifications](kali-status-notifications.md).
