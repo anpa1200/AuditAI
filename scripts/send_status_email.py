@@ -6,7 +6,6 @@ from __future__ import annotations
 import os
 import smtplib
 import ssl
-import sys
 from email.message import EmailMessage
 
 
