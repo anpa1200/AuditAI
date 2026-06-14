@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/project/auditai/
+      url: https://pypi.org/project/1200km-auditai/
     permissions:
       id-token: write
 

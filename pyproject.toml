@@ -3,7 +3,7 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "auditai"
+name = "1200km-auditai"
 version = "1.0.0"
 description = "Linux host vulnerability assessment with optional AI analysis."
 readme = "README.md"
