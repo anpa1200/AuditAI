@@ -5,6 +5,10 @@
 [![CI](https://github.com/anpa1200/AuditAI/actions/workflows/ci.yml/badge.svg)](https://github.com/anpa1200/AuditAI/actions/workflows/ci.yml)
 [![Publish](https://github.com/anpa1200/AuditAI/actions/workflows/publish.yml/badge.svg)](https://github.com/anpa1200/AuditAI/actions/workflows/publish.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![External submissions](https://img.shields.io/badge/External%20submissions-submitted-yellow)](https://github.com/cckuailong/awesome-gpt-security/pull/48)
+[![Accepted upstream](https://img.shields.io/badge/Accepted%20upstream-pending-lightgrey)](https://github.com/cckuailong/awesome-gpt-security/pull/48)
+[![OWASP application](https://img.shields.io/badge/OWASP-application%20draft-blue)](docs/owasp-project-application.md)
+[![Kali packaging](https://img.shields.io/badge/Kali%20packaging-prepared-blue)](docs/kali-new-tool-request.md)
 
 **AI-powered host vulnerability assessment tool running entirely inside Docker.**
 
