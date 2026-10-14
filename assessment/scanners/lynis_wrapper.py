@@ -1,3 +1,4 @@
+from typing import Any
 import os
 import subprocess
 import logging
@@ -13,8 +14,8 @@ LYNIS_REPORT_PATH = "/tmp/lynis-report.dat"
 class LynisScanner(BaseScanner):
     name = "lynis"
 
-    def _scan(self) -> tuple[dict, list]:
-        result = {}
+    def _scan(self) -> tuple[dict[str, Any], list]:
+        result: dict[str, Any] = {}
 
         # Run lynis if available
         lynis_path = _find_lynis()
@@ -70,8 +71,8 @@ def _run_lynis(lynis_path: str, report_path: str = LYNIS_REPORT_PATH) -> tuple[i
         return -1, str(e)
 
 
-def _parse_lynis_report(path: str) -> dict:
-    report = {
+def _parse_lynis_report(path: str) -> dict[str, Any]:
+    report: dict[str, Any] = {
         "hardening_index": None,
         "warnings": [],
         "suggestions": [],

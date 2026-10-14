@@ -28,6 +28,7 @@ Severity below describes the potential consequence, not proof of exploitation.
 | Medium | Finding IDs could collide across AI-analyzed modules | Prefix IDs with the module name and reject unknown synthesis references; `test_ai_validation.py` |
 | Low | Nmap XML/service parsing and headerless `ss` parsing lost observations | Structured XML parsing, preserved fallback evidence and spaced process fields; `test_preprocessor_review.py` |
 | Low | `run.sh --no-ai` still prompted for an API key | Respect explicit disablement and preserve argument boundaries; `test_packaging_review.py` |
+| Medium | Installed Anthropic SDK no longer accepted the explicit `temperature` keyword | Use the supported request signature; offline SDK signature regression in `test_ai_errors.py` |
 | Low | Build metadata declared a setuptools version too old for the SPDX license syntax; sdist lacked helper inputs | Raise build floor and add source manifest; distribution build and `test_packaging_review.py` |
 | Low | Feature branch pushes had no CI coverage | Enable branch CI with Python 3.10/3.12/3.13 tests, correctness lint, distribution builds, and existing Debian build |
 
@@ -53,7 +54,7 @@ The local full suite, CI correctness lint (`E4,E7,E9,F`), Python compilation and
 3.10 syntax checks, shell syntax, source/wheel builds, extracted-source tests,
 and wheel CLI smoke checks are run before push. GitHub CI is checked separately;
 its run status belongs in the completion report, not an assertion in this file.
-No type-checker configuration exists in this repository. Broader inherited Ruff
+Mypy checks (`--ignore-missing-imports assessment`) also run locally and in the Python CI matrix; heterogeneous raw dictionaries have explicit annotations. Broader inherited Ruff
 style/security diagnostics are distinct from the selected CI correctness checks.
 
 Local Debian package building requires `dh-python`, `pybuild-plugin-pyproject`,

@@ -3,6 +3,7 @@ import socket
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
+from typing import Any
 
 from assessment.config import PROC_PATH, SYS_PATH, ETC_PATH, HOST_ROOT
 from assessment.models import ModuleResult
@@ -24,7 +25,7 @@ def validate_host_mounts() -> list[str]:
 
 def collect_host_context() -> dict:
     """Gather basic host information for AI prompts."""
-    ctx = {}
+    ctx: dict[str, Any] = {}
 
     # Hostname
     try:

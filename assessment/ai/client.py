@@ -41,13 +41,13 @@ class AIClient:
                     max_tokens=max_tokens,
                     system=SYSTEM_PROMPT,
                     messages=[{"role": "user", "content": prompt}],
-                    temperature=0,
                 )
                 if getattr(response, "stop_reason", None) == "max_tokens":
                     raise ValueError("AI response exceeded the token limit")
-                if not response.content or not isinstance(getattr(response.content[0], "text", None), str):
+                text = getattr(response.content[0], "text", None) if response.content else None
+                if not isinstance(text, str):
                     raise ValueError("AI response has no text content")
-                content = response.content[0].text.strip()
+                content = text.strip()
                 # Strip markdown code fences if present
                 if content.startswith("```"):
                     lines = content.splitlines()
@@ -64,9 +64,11 @@ class AIClient:
 
             except RateLimitError:
                 wait = RETRY_DELAY * (2 ** attempt)
-                logger.warning(f"Rate limited, waiting {wait}s (attempt {attempt+1}/{MAX_RETRIES})")
                 if attempt < MAX_RETRIES - 1:
+                    logger.warning(f"Rate limited, waiting {wait}s (attempt {attempt+1}/{MAX_RETRIES})")
                     time.sleep(wait)
+                else:
+                    logger.error("Rate limited: all %s attempts exhausted", MAX_RETRIES)
 
             except ValueError as e:
                 logger.error(f"Invalid AI response: {e}")

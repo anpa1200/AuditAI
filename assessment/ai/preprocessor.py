@@ -34,7 +34,7 @@ def preprocess(module_name: str, raw: dict) -> dict:
 # ─── Per-module handlers ──────────────────────────────────────────────────────
 
 def _process_network(raw: dict) -> dict:
-    out = {}
+    out: dict[str, Any] = {}
 
     # Interfaces: keep only name, state, addresses
     ifaces = raw.get("interfaces", [])
@@ -83,7 +83,7 @@ def _process_network(raw: dict) -> dict:
 
 
 def _process_processes(raw: dict) -> dict:
-    out = {}
+    out: dict[str, Any] = {}
     out["total_process_count"] = raw.get("total_process_count", 0)
 
     # Keep suspicious, in-tmp, zombies in full
@@ -94,7 +94,7 @@ def _process_processes(raw: dict) -> dict:
     # Root processes: dedup by name, keep max 30
     root = raw.get("root_processes", [])
     seen_names: set = set()
-    deduped = []
+    deduped: list[dict[str, Any]] = []
     for p in root:
         name = p.get("name", "")
         if name not in seen_names:
@@ -118,7 +118,7 @@ def _process_processes(raw: dict) -> dict:
 
 
 def _process_packages(raw: dict) -> dict:
-    out = {}
+    out: dict[str, Any] = {}
 
     # Drop installed_packages — hundreds of entries, low signal
     total = len(raw.get("installed_packages", []))
@@ -140,7 +140,7 @@ def _process_packages(raw: dict) -> dict:
 
 
 def _process_filesystem(raw: dict) -> dict:
-    out = {}
+    out: dict[str, Any] = {}
 
     # SUID: drop all_suid (huge), keep unknown and counts
     suid = raw.get("suid_sgid_files", {})
@@ -180,7 +180,7 @@ def _process_filesystem(raw: dict) -> dict:
 
 
 def _process_users(raw: dict) -> dict:
-    out = {}
+    out: dict[str, Any] = {}
 
     # passwd: keep only login-shell users and root; drop service accounts
     passwd = raw.get("passwd", [])
@@ -205,7 +205,7 @@ def _process_users(raw: dict) -> dict:
 
 
 def _process_os_hardening(raw: dict) -> dict:
-    out = {}
+    out: dict[str, Any] = {}
 
     # Sysctl: keep only non-compliant parameters
     sysctl = raw.get("sysctl_params", {})
@@ -234,7 +234,7 @@ def _process_os_hardening(raw: dict) -> dict:
 
 
 def _process_services(raw: dict) -> dict:
-    out = {}
+    out: dict[str, Any] = {}
 
     # Systemd units: keep failed (active=="failed" or sub=="failed") + count enabled
     units = raw.get("systemd_units", [])
@@ -271,7 +271,7 @@ def _process_services(raw: dict) -> dict:
 
 
 def _process_kernel(raw: dict) -> dict:
-    out = {}
+    out: dict[str, Any] = {}
 
     # CPU vulnerabilities: keep only non-mitigated
     vulns = raw.get("cpu_vulnerabilities", {})
@@ -295,7 +295,7 @@ def _process_kernel(raw: dict) -> dict:
 
 def _process_lynis(raw: dict) -> dict:
     # Lynis output is already fairly structured; just trim large text fields
-    out = {}
+    out: dict[str, Any] = {}
     for k, v in raw.items():
         if isinstance(v, str) and len(v) > 3000:
             out[k] = v[:3000] + "\n... [truncated by preprocessor]"
@@ -336,7 +336,7 @@ def _cpu_status_safe(status: Any) -> bool:
 def _parse_nmap_xml(xml: str) -> list[dict]:
     """Extract open ports without depending on XML attribute order."""
     root = ET.fromstring(xml)
-    ports = []
+    ports: list[dict[str, Any]] = []
     for port in root.findall(".//host/ports/port"):
         state = port.find("state")
         if state is None or state.get("state") != "open":
@@ -358,7 +358,7 @@ def _parse_nmap_xml(xml: str) -> list[dict]:
 
 def _parse_ss(ss_output: str) -> list[dict]:
     """Parse `ss -tlnpu` output into structured list."""
-    results = []
+    results: list[dict[str, Any]] = []
     if not ss_output:
         return results
     for line in ss_output.splitlines():
@@ -377,7 +377,7 @@ def _parse_ss(ss_output: str) -> list[dict]:
 
 def _summarise_iptables(ipt: dict) -> dict:
     """Summarise iptables rules — flag if default ACCEPT policy exists."""
-    summary = {}
+    summary: dict[str, Any] = {}
     for table, rules in ipt.items():
         if not isinstance(rules, str):
             summary[table] = rules

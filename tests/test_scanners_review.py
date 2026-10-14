@@ -238,3 +238,13 @@ def test_unreadable_cpu_status_is_preserved(tmp_path, monkeypatch):
 def test_missing_lockdown_state_is_unknown(tmp_path, monkeypatch):
     monkeypatch.setattr(kernel, 'SYS_PATH', str(tmp_path))
     assert kernel._check_lockdown()['enabled'] is None
+
+
+def test_osv_unexpected_success_status_is_incomplete(monkeypatch):
+    monkeypatch.setattr(packages, '_read_os_release', lambda: {'ID': 'debian', 'VERSION_ID': '12'})
+    response = Mock(status_code=204)
+    monkeypatch.setattr(packages.requests, 'post', Mock(return_value=response))
+    result = packages._check_cves([{'name': 'openssl', 'version': 'synthetic'}])
+    assert result['status'] == 'partial'
+    assert result['checked_packages'] == 0
+    assert result['errors'][0]['error'] == 'Unexpected OSV response status: 204'

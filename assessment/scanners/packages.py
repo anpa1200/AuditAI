@@ -1,3 +1,4 @@
+from typing import Any
 import os
 import subprocess
 from datetime import date
@@ -14,8 +15,8 @@ OSV_API = "https://api.osv.dev/v1/query"
 class PackagesScanner(BaseScanner):
     name = "packages"
 
-    def _scan(self) -> tuple[dict, list]:
-        result = {}
+    def _scan(self) -> tuple[dict[str, Any], list]:
+        result: dict[str, Any] = {}
         result["os_info"] = _read_os_release()
         result["package_manager"] = _detect_package_manager()
         result["installed_packages"] = _get_installed_packages()
@@ -30,8 +31,8 @@ class PackagesScanner(BaseScanner):
         return result, []
 
 
-def _read_os_release() -> dict:
-    result = {}
+def _read_os_release() -> dict[str, Any]:
+    result: dict[str, Any] = {}
     path = f"{ETC_PATH}/os-release"
     try:
         with open(path) as f:
@@ -53,7 +54,7 @@ def _detect_package_manager() -> str:
     return "unknown"
 
 
-def _get_installed_packages() -> list[dict]:
+def _get_installed_packages() -> list[dict[str, Any]]:
     # Try dpkg first
     dpkg_status = f"{VAR_PATH}/lib/dpkg/status"
     if os.path.exists(dpkg_status):
@@ -75,9 +76,9 @@ def _get_installed_packages() -> list[dict]:
     return []
 
 
-def _parse_dpkg_status(path: str) -> list[dict]:
+def _parse_dpkg_status(path: str) -> list[dict[str, Any]]:
     packages = []
-    current = {}
+    current: dict[str, str] = {}
     try:
         with open(path) as f:
             for line in f:
@@ -104,7 +105,7 @@ def _parse_dpkg_status(path: str) -> list[dict]:
     return packages
 
 
-def _check_dangerous_packages(packages: list[dict]) -> list[dict]:
+def _check_dangerous_packages(packages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     installed_names = {p["name"].lower() for p in packages}
     found = []
     for dangerous in DANGEROUS_PACKAGES:
@@ -113,7 +114,7 @@ def _check_dangerous_packages(packages: list[dict]) -> list[dict]:
     return found
 
 
-def _check_cves(packages: list[dict]) -> dict:
+def _check_cves(packages: list[dict[str, Any]]) -> dict[str, Any]:
     """Check packages against OSV.dev for known vulnerabilities."""
     findings = []
     # Only check high-risk packages to avoid rate limiting
@@ -155,6 +156,8 @@ def _check_cves(packages: list[dict]) -> dict:
             }
             resp = requests.post(OSV_API, json=payload, timeout=10)
             resp.raise_for_status()
+            if resp.status_code != 200:
+                raise ValueError(f"Unexpected OSV response status: {resp.status_code}")
             if resp.status_code == 200:
                 data = resp.json()
                 checked += 1
@@ -178,8 +181,8 @@ def _check_cves(packages: list[dict]) -> dict:
             "limited_to_high_risk_packages": True, "errors": errors, "findings": findings}
 
 
-def _check_package_integrity() -> dict:
-    result = {}
+def _check_package_integrity() -> dict[str, Any]:
+    result: dict[str, Any] = {}
     # Check dpkg integrity
     dpkg_admindir = f"{VAR_PATH}/lib/dpkg"
     if os.path.exists(dpkg_admindir):
@@ -206,8 +209,8 @@ def _check_package_integrity() -> dict:
     return result
 
 
-def _check_auto_updates() -> dict:
-    result = {}
+def _check_auto_updates() -> dict[str, Any]:
+    result: dict[str, Any] = {}
     # Check unattended-upgrades
     paths = [
         f"{ETC_PATH}/apt/apt.conf.d/20auto-upgrades",
@@ -223,7 +226,7 @@ def _check_auto_updates() -> dict:
     return result
 
 
-def _check_os_eol(os_info: dict) -> dict:
+def _check_os_eol(os_info: dict) -> dict[str, Any]:
     """Check if the OS version is end-of-life."""
     eol_versions = {
         # Ubuntu EOL dates (simplified)
@@ -265,7 +268,7 @@ def _check_os_eol(os_info: dict) -> dict:
     return {"distro": distro_id, "version": version_id, "eol_known": False}
 
 
-def _check_upgrades() -> dict:
+def _check_upgrades() -> dict[str, Any]:
     if HOST_ROOT and HOST_ROOT != "/":
         return {"status": "unavailable", "error": "Host upgrade simulation is unavailable from a mounted filesystem"}
     try:

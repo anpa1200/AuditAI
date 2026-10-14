@@ -41,8 +41,10 @@ def test_retry_exhaustion(monkeypatch, failure):
         else:
             create.side_effect = APIError('temporary failure', request, body=None)
     monkeypatch.setattr(client.client.messages, 'create', create)
-    monkeypatch.setattr('assessment.ai.client.time.sleep', lambda _: None)
+    sleep = Mock()
+    monkeypatch.setattr('assessment.ai.client.time.sleep', sleep)
     response = client.analyze('offline')
+    assert sleep.call_count == 3
     assert create.call_count == 4
     assert response['error']
     assert response['module_risk_score'] is None
@@ -164,3 +166,17 @@ def test_sdk_permanent_errors_and_retry_success(monkeypatch, kind):
             client.analyze('offline')
         assert create.call_count == 1
         sleep.assert_not_called()
+
+
+def test_sdk_request_signature_is_supported(monkeypatch):
+    import inspect
+    client = AIClient(api_key='synthetic-test-key')
+    signature = inspect.signature(client.client.messages.create)
+
+    def offline_create(**kwargs):
+        # Bind against the real installed SDK signature before mocking transport.
+        signature.bind(**kwargs)
+        return SimpleNamespace(content=[SimpleNamespace(text='{}')])
+
+    monkeypatch.setattr(client.client.messages, 'create', offline_create)
+    assert client.analyze('offline') == {}

@@ -1,3 +1,4 @@
+from typing import Any
 import os
 import subprocess
 import logging
@@ -11,8 +12,8 @@ logger = logging.getLogger(__name__)
 class KernelScanner(BaseScanner):
     name = "kernel"
 
-    def _scan(self) -> tuple[dict, list]:
-        result = {}
+    def _scan(self) -> tuple[dict[str, Any], list]:
+        result: dict[str, Any] = {}
         result["version"] = _get_kernel_version()
         result["modules"] = _get_loaded_modules()
         result["cpu_vulnerabilities"] = _check_cpu_vulnerabilities()
@@ -25,8 +26,8 @@ class KernelScanner(BaseScanner):
         return result, []
 
 
-def _get_kernel_version() -> dict:
-    result = {}
+def _get_kernel_version() -> dict[str, Any]:
+    result: dict[str, Any] = {}
     try:
         with open(f"{PROC_PATH}/version") as f:
             result["full"] = f.read().strip()
@@ -55,7 +56,7 @@ def _get_kernel_version() -> dict:
     return result
 
 
-def _get_loaded_modules() -> list[dict]:
+def _get_loaded_modules() -> list[dict[str, Any]]:
     modules = []
     try:
         with open(f"{PROC_PATH}/modules") as f:
@@ -72,9 +73,9 @@ def _get_loaded_modules() -> list[dict]:
     return modules
 
 
-def _check_cpu_vulnerabilities() -> dict:
+def _check_cpu_vulnerabilities() -> dict[str, Any]:
     vuln_dir = f"{SYS_PATH}/devices/system/cpu/vulnerabilities"
-    result = {}
+    result: dict[str, Any] = {}
     if not os.path.isdir(vuln_dir):
         return {"status": "directory not found"}
     try:
@@ -98,7 +99,7 @@ def _check_cpu_vulnerabilities() -> dict:
     return result
 
 
-def _check_lockdown() -> dict:
+def _check_lockdown() -> dict[str, Any]:
     lockdown_path = f"{SYS_PATH}/kernel/security/lockdown"
     if os.path.exists(lockdown_path):
         try:
@@ -113,7 +114,7 @@ def _check_lockdown() -> dict:
     return {"enabled": None, "status": "lockdown state not available"}
 
 
-def _check_modules_disabled() -> dict:
+def _check_modules_disabled() -> dict[str, Any]:
     path = f"{PROC_PATH}/sys/kernel/modules_disabled"
     try:
         with open(path) as f:
@@ -145,7 +146,7 @@ def _check_dmesg() -> list[str]:
         return []
 
 
-def _get_kernel_params() -> dict:
+def _get_kernel_params() -> dict[str, Any]:
     """Read key kernel security parameters from /proc/sys."""
     params = {
         "kernel.randomize_va_space": f"{PROC_PATH}/sys/kernel/randomize_va_space",
@@ -155,7 +156,7 @@ def _get_kernel_params() -> dict:
         "kernel.unprivileged_bpf_disabled": f"{PROC_PATH}/sys/kernel/unprivileged_bpf_disabled",
         "kernel.yama.ptrace_scope": f"{PROC_PATH}/sys/kernel/yama/ptrace_scope",
     }
-    result = {}
+    result: dict[str, Any] = {}
     for name, path in params.items():
         try:
             with open(path) as f:
@@ -165,7 +166,7 @@ def _get_kernel_params() -> dict:
     return result
 
 
-def _check_kexec() -> dict:
+def _check_kexec() -> dict[str, Any]:
     kexec_path = f"{PROC_PATH}/sys/kernel/kexec_load_disabled"
     try:
         with open(kexec_path) as f:
@@ -175,7 +176,7 @@ def _check_kexec() -> dict:
         return {"error": "not readable"}
 
 
-def _check_bpf() -> dict:
+def _check_bpf() -> dict[str, Any]:
     bpf_path = f"{PROC_PATH}/sys/kernel/unprivileged_bpf_disabled"
     try:
         with open(bpf_path) as f:

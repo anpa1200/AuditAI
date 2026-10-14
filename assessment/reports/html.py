@@ -117,15 +117,15 @@ def generate_html(report: Report, output_dir: str) -> str:
     finding_map = {f.id: f for f in report.all_findings}
     priorities_html = ""
     for i, fid in enumerate(report.top_priorities[:10], 1):
-        f = finding_map.get(fid)
-        if f:
-            color = SEVERITY_COLOR.get(f.severity, "#6b7280")
+        priority_finding = finding_map.get(fid)
+        if priority_finding:
+            color = SEVERITY_COLOR.get(priority_finding.severity, "#6b7280")
             priorities_html += f"""
             <div class="priority-item">
               <span class="priority-num">{i}</span>
-              <span class="badge" style="background:{color}">{_esc(f.severity)}</span>
-              <strong>{_esc(f.title)}</strong>
-              <span class="category-tag">{_esc(f.category)}</span>
+              <span class="badge" style="background:{color}">{_esc(priority_finding.severity)}</span>
+              <strong>{_esc(priority_finding.title)}</strong>
+              <span class="category-tag">{_esc(priority_finding.category)}</span>
             </div>"""
 
     risk_color = RISK_BADGE_COLOR.get(report.overall_risk_rating, "#6b7280")
