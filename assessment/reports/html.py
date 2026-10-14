@@ -21,6 +21,8 @@ RISK_BADGE_COLOR = {
 
 
 def generate_html(report: Report, output_dir: str) -> str:
+    score = "unavailable" if report.overall_risk_score is None else f"{report.overall_risk_score}/100"
+    report_error = f'<div class="error-box">Assessment incomplete: {_esc(report.error)}</div>' if report.error else ""
     counts = report.severity_counts()
     all_findings_sorted = sorted(
         report.all_findings,
@@ -44,7 +46,7 @@ def generate_html(report: Report, output_dir: str) -> str:
     # Build module sections
     module_sections = ""
     for mr in report.module_results:
-        error_html = f'<div class="error-box">Scanner failed: {_esc(mr.error)}</div>' if mr.error else ""
+        error_html = f'<div class="error-box">Module failed: {_esc(mr.error)}</div>' if mr.error else ""
         findings_html = ""
         if mr.findings:
             sorted_findings = sorted(mr.findings, key=lambda f: SEVERITY_ORDER.get(f.severity, 99))
@@ -69,7 +71,7 @@ def generate_html(report: Report, output_dir: str) -> str:
           <div class="module-header" onclick="toggleSection(this)">
             <span class="module-title">{mr.module_name.replace("_", " ").title()}</span>
             <div class="module-meta">
-              <span class="risk-score">Risk: {mr.module_risk_score}/100</span>
+              <span class="risk-score">Risk: {"unavailable" if mr.module_risk_score is None else str(mr.module_risk_score) + "/100"}</span>
               <span class="finding-count">{len(mr.findings)} findings</span>
               <span class="duration">{mr.duration_seconds:.1f}s</span>
               <span class="chevron">▼</span>
@@ -194,7 +196,8 @@ ol li, ul li {{ margin-bottom: 6px; }}
 <header>
   <h1>🔒 Host Vulnerability Assessment Report</h1>
   <div>
-    <span class="risk-badge">{report.overall_risk_rating} RISK — {report.overall_risk_score}/100</span>
+    {report_error}
+    <span class="risk-badge">{report.overall_risk_rating} RISK — {score}</span>
   </div>
   <div class="header-meta">
     <span>🖥️ <strong>{_esc(report.hostname)}</strong></span>

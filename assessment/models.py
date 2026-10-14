@@ -22,7 +22,7 @@ class ModuleResult:
     module_name: str
     findings: list[Finding]
     raw_output: dict
-    module_risk_score: int
+    module_risk_score: Optional[int]
     module_summary: str
     duration_seconds: float
     error: Optional[str] = None
@@ -45,12 +45,13 @@ class Report:
     module_results: list[ModuleResult]
     attack_chains: list[AttackChain]
     top_priorities: list[str]
-    overall_risk_score: int
-    overall_risk_rating: Severity
+    overall_risk_score: Optional[int]
+    overall_risk_rating: Literal["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO", "UNKNOWN"]
     executive_summary: str
     lynis_score: Optional[int]
     recommended_actions: list[str]
     all_findings: list[Finding] = field(default_factory=list)
+    error: Optional[str] = None
 
     def __post_init__(self):
         self.all_findings = []

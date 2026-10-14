@@ -13,6 +13,7 @@ SEVERITY_EMOJI = {
 
 
 def generate_markdown(report: Report, output_dir: str) -> str:
+    score = "unavailable" if report.overall_risk_score is None else f"{report.overall_risk_score}/100"
     lines = []
 
     # Header
@@ -24,11 +25,14 @@ def generate_markdown(report: Report, output_dir: str) -> str:
         f"| **Hostname** | `{report.hostname}` |",
         f"| **Scan Time** | {report.scan_timestamp} |",
         f"| **OS** | {report.os_info.get('PRETTY_NAME', 'Unknown')} |",
-        f"| **Overall Risk** | **{report.overall_risk_rating}** ({report.overall_risk_score}/100) |",
+        f"| **Overall Risk** | **{report.overall_risk_rating}** ({score}) |",
     ]
     if report.lynis_score is not None:
         lines.append(f"| **Lynis Score** | {report.lynis_score}/100 |")
     lines.append("")
+
+    if report.error:
+        lines += [f"> ⚠️ Assessment incomplete: {report.error}", ""]
 
     # Severity summary
     counts = report.severity_counts()
@@ -95,15 +99,14 @@ def generate_markdown(report: Report, output_dir: str) -> str:
             lines += [
                 f"### {mr.module_name.replace('_', ' ').title()}",
                 f"",
-                f"> ⚠️ Scanner failed: `{mr.error}`",
+                f"> ⚠️ Module failed: `{mr.error}`",
                 "",
             ]
-            continue
 
         lines += [
             f"### {mr.module_name.replace('_', ' ').title()}",
             f"",
-            f"**Risk Score:** {mr.module_risk_score}/100 | "
+            f"**Risk Score:** {"unavailable" if mr.module_risk_score is None else str(mr.module_risk_score) + "/100"} | "
             f"**Findings:** {len(mr.findings)} | "
             f"**Duration:** {mr.duration_seconds:.1f}s",
             f"",

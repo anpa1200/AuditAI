@@ -389,3 +389,14 @@ This project is part of the 1200km security research ecosystem. Use [AdversaryGr
 - [Live ATT&CK/ATLAS workspace](https://1200km.com/threat-matrix/)
 - [1200km security research ecosystem](https://1200km.com/)
 
+
+### Incomplete assessments
+
+Failed scanner modules and AI analysis are recorded in `ModuleResult.error`;
+reports expose an aggregate `Report.error`. An incomplete assessment has an
+`UNKNOWN` overall risk rating and an unavailable (`None`) overall risk score.
+AI failures preserve collected scanner evidence and use an unavailable module
+risk score. HTML and Markdown reports identify the failure, and the CLI saves
+the reports before exiting with status 1. Permanent authentication or billing
+errors still stop AI processing immediately with status 1. A successful
+`--no-ai` scan retains its existing scanner-only behavior.

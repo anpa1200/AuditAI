@@ -4,6 +4,7 @@ import time
 from anthropic import Anthropic, APIError, RateLimitError, AuthenticationError
 from assessment.config import ANTHROPIC_API_KEY, DEFAULT_MODEL
 from assessment.ai.prompts import SYSTEM_PROMPT
+from assessment.ai.errors import InsufficientCreditsError
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +25,6 @@ def _is_fatal_api_error(exc: Exception) -> bool:
     """Return True if the error is permanent and retrying will not help."""
     msg = str(exc).lower()
     return any(phrase.lower() in msg for phrase in _FATAL_PHRASES)
-
-
-class InsufficientCreditsError(Exception):
-    """Raised when the Anthropic account has no credits."""
-    pass
 
 
 class AIClient:
@@ -69,7 +65,7 @@ class AIClient:
                 if attempt == MAX_RETRIES - 1:
                     return {
                         "error": f"JSON decode failed: {e}",
-                        "findings": [], "module_risk_score": 0,
+                        "module_risk_score": None,
                         "module_summary": "AI analysis failed",
                     }
                 time.sleep(RETRY_DELAY)
@@ -86,13 +82,13 @@ class AIClient:
                 if attempt == MAX_RETRIES - 1:
                     return {
                         "error": str(e),
-                        "findings": [], "module_risk_score": 0,
+                        "module_risk_score": None,
                         "module_summary": "AI analysis failed",
                     }
                 time.sleep(RETRY_DELAY)
 
         return {
             "error": "max retries exceeded",
-            "findings": [], "module_risk_score": 0,
+            "module_risk_score": None,
             "module_summary": "AI analysis failed",
         }

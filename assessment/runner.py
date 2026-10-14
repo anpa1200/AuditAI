@@ -101,6 +101,7 @@ def run_scanners(
             results.append(result)
         except Exception as e:
             logger.error(f"Scanner {module_name} raised exception: {e}")
+            results.append(ModuleResult(module_name, [], {}, None, "Scanner failed", 0, str(e)))
 
     # Wait for lynis
     if lynis_future:
@@ -109,6 +110,7 @@ def run_scanners(
             results.append(lynis_result)
         except Exception as e:
             logger.error(f"Lynis scanner failed: {e}")
+            results.append(ModuleResult("lynis", [], {}, None, "Scanner failed", 0, str(e)))
 
     executor.shutdown(wait=False)
 

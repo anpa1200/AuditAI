@@ -122,6 +122,8 @@ def main(modules, skip, output_dir, fmt, model, no_ai, severity, verbose):
                 fg="yellow"
             ))
             sys.exit(1)
+        except Exception as e:  # noqa: BLE001 - save scanner evidence when synthesis fails
+            synthesis = {"error": str(e)}
     else:
         click.echo(click.style("\n► Skipping AI analysis (--no-ai)", fg="yellow"))
         synthesis = {
@@ -165,7 +167,8 @@ def main(modules, skip, output_dir, fmt, model, no_ai, severity, verbose):
                   "LOW": "green", "UNKNOWN": "white"}.get(report.overall_risk_rating, "white")
 
     click.echo(click.style("\n╔══════════════════ SUMMARY ══════════════════╗", fg="cyan"))
-    click.echo(f"  Overall Risk: " + click.style(f"{report.overall_risk_rating} ({report.overall_risk_score}/100)", fg=risk_color))
+    score = "unavailable" if report.overall_risk_score is None else f"{report.overall_risk_score}/100"
+    click.echo("  Overall Risk: " + click.style(f"{report.overall_risk_rating} ({score})", fg=risk_color))
     if report.lynis_score is not None:
         click.echo(f"  Lynis Hardening Index: {report.lynis_score}/100")
     click.echo(f"  Findings:")
@@ -176,6 +179,10 @@ def main(modules, skip, output_dir, fmt, model, no_ai, severity, verbose):
     if report.recommended_actions:
         click.echo(f"\n  Top Action: {report.recommended_actions[0]}")
     click.echo(click.style("╚══════════════════════════════════════════════╝\n", fg="cyan"))
+
+    if report.error:
+        click.echo(click.style(f"ERROR: Assessment incomplete: {report.error}", fg="red"))
+        sys.exit(1)
 
 
 def _setup_logging(verbose: bool):
