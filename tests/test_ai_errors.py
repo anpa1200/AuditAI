@@ -109,7 +109,8 @@ def test_cli_offline(monkeypatch, tmp_path, failure):
     monkeypatch.setattr(cli, 'validate_host_mounts', list)
     monkeypatch.setattr(cli, 'collect_host_context', lambda: {'hostname': 'test', 'os_name': 'Linux', 'kernel_version': 'test'})
     monkeypatch.setattr(cli, 'run_scanners', lambda *a, **k: [mr])
-    response = {'findings': [], 'module_risk_score': 12, 'overall_risk_score': 12, 'overall_risk_rating': 'LOW'}
+    response = {'findings': [], 'module_risk_score': 12, 'module_summary': 'ok', 'executive_summary': 'ok',
+                'attack_chains': [], 'top_10_priorities': [], 'recommended_immediate_actions': [], 'overall_risk_score': 12, 'overall_risk_rating': 'LOW'}
     if failure == 'module':
         responses = [{'error': 'offline failure'}, response]
     elif failure == 'synthesis':
@@ -131,3 +132,35 @@ def test_cli_offline(monkeypatch, tmp_path, failure):
     if failure in ('module', 'synthesis', 'exception'):
         assert 'Assessment incomplete:' in result.output
         assert 'UNKNOWN (unavailable)' in result.output
+
+
+@pytest.mark.parametrize('kind', ['authentication', 'billing', 'success_after_rate'])
+def test_sdk_permanent_errors_and_retry_success(monkeypatch, kind):
+    from assessment.ai.client import AuthenticationError
+    try:
+        import httpx2 as httpx
+    except ImportError:
+        import httpx
+    request = httpx.Request('POST', 'https://example.invalid')
+    client = AIClient(api_key='synthetic-test-key')
+    response = SimpleNamespace(content=[SimpleNamespace(text='{"findings": [], "module_risk_score": 12, "module_summary": "ok"}')])
+    if kind == 'authentication':
+        effects = [AuthenticationError('synthetic authentication failure',
+                                       response=httpx.Response(401, request=request), body=None)]
+    elif kind == 'billing':
+        effects = [APIError('credit balance is too low', request, body=None)]
+    else:
+        effects = [RateLimitError('synthetic rate limit', response=httpx.Response(429, request=request), body=None), response]
+    create = Mock(side_effect=effects)
+    sleep = Mock()
+    monkeypatch.setattr(client.client.messages, 'create', create)
+    monkeypatch.setattr('assessment.ai.client.time.sleep', sleep)
+    if kind == 'success_after_rate':
+        assert client.analyze('offline')['module_risk_score'] == 12
+        assert create.call_count == 2
+        sleep.assert_called_once_with(15)
+    else:
+        with pytest.raises(InsufficientCreditsError):
+            client.analyze('offline')
+        assert create.call_count == 1
+        sleep.assert_not_called()

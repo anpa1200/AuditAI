@@ -1,10 +1,10 @@
 import os
 import subprocess
-import json
+from datetime import date
 import logging
 import requests
 from assessment.scanners.base import BaseScanner
-from assessment.config import ETC_PATH, VAR_PATH, DANGEROUS_PACKAGES
+from assessment.config import ETC_PATH, VAR_PATH, HOST_ROOT, DANGEROUS_PACKAGES
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ def _get_installed_packages() -> list[dict]:
     # Try rpm
     try:
         out = subprocess.check_output(
-            ["rpm", "-qa", "--queryformat", "%{NAME} %{VERSION}-%{RELEASE}\n"],
+            ["rpm", "--root", HOST_ROOT or "/", "-qa", "--queryformat", "%{NAME} %{VERSION}-%{RELEASE}\n"],
             text=True, timeout=30
         )
         packages = []
@@ -82,16 +82,22 @@ def _parse_dpkg_status(path: str) -> list[dict]:
         with open(path) as f:
             for line in f:
                 if line.startswith("Package:"):
-                    if current.get("name") and current.get("status", "").startswith("install ok"):
+                    if current.get("name") and current.get("status", "") == "install ok installed":
                         packages.append(current)
                     current = {"name": line.split(":", 1)[1].strip()}
                 elif line.startswith("Version:"):
                     current["version"] = line.split(":", 1)[1].strip()
+                elif line.startswith("Source:"):
+                    source = line.split(":", 1)[1].strip().split()
+                    if source:
+                        current["source_name"] = source[0]
+                        if len(source) > 1:
+                            current["source_version"] = source[1].strip("()")
                 elif line.startswith("Status:"):
                     current["status"] = line.split(":", 1)[1].strip()
                 elif line.startswith("Architecture:"):
                     current["arch"] = line.split(":", 1)[1].strip()
-        if current.get("name") and current.get("status", "").startswith("install ok"):
+        if current.get("name") and current.get("status", "") == "install ok installed":
             packages.append(current)
     except Exception as e:
         logger.warning(f"Failed to parse dpkg status: {e}")
@@ -107,7 +113,7 @@ def _check_dangerous_packages(packages: list[dict]) -> list[dict]:
     return found
 
 
-def _check_cves(packages: list[dict]) -> list[dict]:
+def _check_cves(packages: list[dict]) -> dict:
     """Check packages against OSV.dev for known vulnerabilities."""
     findings = []
     # Only check high-risk packages to avoid rate limiting
@@ -125,20 +131,33 @@ def _check_cves(packages: list[dict]) -> list[dict]:
     ][:30]  # Limit API calls
 
     os_info = _read_os_release()
-    ecosystem = "Debian" if os_info.get("ID") in ["debian", "ubuntu"] else "PyPI"
+    distro = os_info.get("ID", "")
+    release = os_info.get("VERSION_ID", "")
+    if distro == "debian" and release:
+        ecosystem = f"Debian:{release.split('.')[0]}"
+    elif distro == "ubuntu" and release:
+        # OSV uses source packages and requires the LTS suffix for LTS releases.
+        lts = ":LTS" if release.endswith(".04") and release[:2].isdigit() and int(release[:2]) % 2 == 0 else ""
+        ecosystem = f"Ubuntu:{release}{lts}"
+    else:
+        return {"status": "unsupported", "error": "OSV lookup unsupported for this OS", "findings": []}
+    errors = []
+    checked = 0
 
     for pkg in packages_to_check:
         try:
             payload = {
                 "package": {
-                    "name": pkg["name"],
+                    "name": pkg.get("source_name", pkg["name"]),
                     "ecosystem": ecosystem,
                 },
-                "version": pkg["version"],
+                "version": pkg.get("source_version", pkg["version"]),
             }
             resp = requests.post(OSV_API, json=payload, timeout=10)
+            resp.raise_for_status()
             if resp.status_code == 200:
                 data = resp.json()
+                checked += 1
                 vulns = data.get("vulns", [])
                 if vulns:
                     for vuln in vulns[:3]:  # Max 3 CVEs per package
@@ -152,8 +171,11 @@ def _check_cves(packages: list[dict]) -> list[dict]:
                         })
         except Exception as e:
             logger.debug(f"OSV check failed for {pkg['name']}: {e}")
+            errors.append({"package": pkg["name"], "error": str(e) or type(e).__name__})
 
-    return findings
+    return {"status": "partial" if errors else "completed", "ecosystem": ecosystem,
+            "checked_packages": checked, "selected_packages": len(packages_to_check),
+            "limited_to_high_risk_packages": True, "errors": errors, "findings": findings}
 
 
 def _check_package_integrity() -> dict:
@@ -163,7 +185,8 @@ def _check_package_integrity() -> dict:
     if os.path.exists(dpkg_admindir):
         try:
             out = subprocess.check_output(
-                ["dpkg", "--verify", f"--admindir={dpkg_admindir}"],
+                ["dpkg", "--verify", "--root=" + (HOST_ROOT or "/"),
+                 f"--admindir={dpkg_admindir}"],
                 text=True, timeout=60, stderr=subprocess.STDOUT
             )
             lines = out.strip().splitlines()
@@ -236,13 +259,15 @@ def _check_os_eol(os_info: dict) -> dict:
                 "distro": distro_id,
                 "version": version_id,
                 "eol_date": eol_date,
-                "is_eol": eol_date < "2026-03-09",  # current date
+                "is_eol": date.today() > date.fromisoformat(eol_date),
             }
 
     return {"distro": distro_id, "version": version_id, "eol_known": False}
 
 
 def _check_upgrades() -> dict:
+    if HOST_ROOT and HOST_ROOT != "/":
+        return {"status": "unavailable", "error": "Host upgrade simulation is unavailable from a mounted filesystem"}
     try:
         # Check apt for pending security updates
         out = subprocess.check_output(

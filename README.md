@@ -10,7 +10,7 @@
 [![OWASP application](https://img.shields.io/badge/OWASP-application%20draft-blue)](docs/owasp-project-application.md)
 [![Kali packaging](https://img.shields.io/badge/Kali%20packaging-prepared-blue)](docs/kali-new-tool-request.md)
 
-**AI-powered host vulnerability assessment tool running entirely inside Docker.**
+**Linux host vulnerability assessment with optional Claude analysis, available as a CLI or Docker image.**
 
 AuditAI runs nine security scanner modules against your Linux host, feeds the raw findings to Claude, and produces a prioritized vulnerability report with attack chain analysis — all from a single command.
 
@@ -56,7 +56,7 @@ AuditAI is a three-stage pipeline:
 
 **Stage 3 — Report:** Findings, attack chains, and priorities are rendered to a self-contained HTML report and Markdown file.
 
-The container mounts the host filesystem **read-only** and uses `--pid=host` + `--network=host` to see the real process table and network state. It **cannot modify** anything on the host.
+The container mounts the host filesystem **read-only** and uses `--pid=host` + `--network=host` to see the real process table and network state. Read-only mounts prevent ordinary writes through those mounts. Shared host process/network namespaces and elevated capabilities still grant sensitive access; the container is not a security boundary.
 
 ---
 
@@ -64,7 +64,7 @@ The container mounts the host filesystem **read-only** and uses `--pid=host` + `
 
 - Docker (any recent version)
 - Linux host (Ubuntu/Debian recommended; other distros work)
-- [Anthropic API key](https://console.anthropic.com/) — ~$0.10–0.30 per full scan on Sonnet
+- [Anthropic API key](https://console.anthropic.com/) for optional AI analysis; provider pricing and scan size determine cost
 
 The installed `auditai` CLI can run directly on a Kali/Linux host without
 Docker or an API key:
@@ -82,6 +82,8 @@ sudo auditai --no-ai --output-dir ./output
 
 ```bash
 pip install 1200km-auditai
+# For Claude analysis, install the optional SDK:
+pip install '1200km-auditai[ai]'
 auditai --help
 sudo auditai --no-ai --output-dir ./output
 ```
@@ -136,7 +138,7 @@ Debian/Kali metadata is under [`debian/`](debian/), with a complete
 # Specific modules only
 ./run.sh --modules network,users,kernel
 
-# No AI analysis — raw scanner output only (no API calls)
+# No Claude analysis — raw scanner output (package OSV lookups still use the network)
 ./run.sh --no-ai
 
 # Show only HIGH and CRITICAL findings
@@ -158,7 +160,7 @@ ANTHROPIC_API_KEY=sk-ant-... docker compose run assessment
 ### Direct CLI (development mode — no Docker)
 
 ```bash
-# HOST_ROOT="" makes scanners read the real / instead of /host
+# The native CLI defaults to the local root; HOST_ROOT can select a mounted host root
 HOST_ROOT="" python3 -m assessment.cli --modules kernel,os_hardening --no-ai
 ```
 
@@ -214,7 +216,7 @@ Useful when iterating on a scanner without rebuilding the image.
 | `processes` | Process capabilities (decoded from hex bitmask), deleted executables, reverse shell indicators, root processes |
 | `filesystem` | SUID/SGID binaries vs. known-good baseline, world-writable system files, sensitive file permissions |
 | `kernel` | CPU vulnerability mitigations (Spectre/Meltdown/etc.), kernel lockdown, BPF restrictions, loaded modules |
-| `packages` | Installed packages vs. [OSV.dev](https://osv.dev/) CVE database (no API key needed), dangerous legacy packages, auto-update config |
+| `packages` | Selected Debian/Ubuntu source packages vs. [OSV.dev](https://osv.dev/) (up to 30 high-risk packages and 3 advisories each), explicit lookup/coverage status, dangerous legacy packages, auto-update config |
 | `lynis` | Full lynis host audit, hardening index score (0–100), warnings and suggestions |
 
 ---
@@ -267,7 +269,7 @@ Two files are written to `./output/` after each scan:
 | `-v /proc:/host/proc:ro` | `/proc` is a virtual filesystem not captured by the `/` mount. Must be mounted separately. |
 | `-v /sys:/host/sys:ro` | Same as `/proc`. Contains CPU vulnerability data, security module status, kernel parameters. |
 
-`--privileged` is intentionally **not used**. The container operates within normal Linux namespace boundaries and cannot modify host kernel state.
+`--privileged` is intentionally **not used**. Host namespaces and these capabilities grant substantial access, including to network state and processes. Read-only mounts alone do not prevent every possible host modification.
 
 ---
 
@@ -276,17 +278,18 @@ Two files are written to `./output/` after each scan:
 | Error | Behavior |
 |-------|----------|
 | Scanner crash (nmap timeout, permission denied) | Records error in report, continues other modules |
-| API rate limit (429) | Exponential backoff: 15s → 30s → 60s → 120s, up to 4 retries |
+| API rate limit (429) | Up to 4 attempts, with 15s → 30s → 60s delays between attempts |
 | Insufficient API credits (400) | Fails immediately with actionable message, suggests `--no-ai` |
-| JSON decode error in AI response | Retries up to 4 times, records empty findings on final failure |
+| Invalid JSON or truncated AI response | Up to 4 attempts; final failure preserves scanner evidence and marks analysis incomplete |
+| Invalid AI response schema or synthesis references | Marks analysis incomplete; unavailable overall risk; reports saved; exit 1 |
 | `systemctl` not found (Docker) | Falls back to reading `.service` files from host filesystem |
 
 ---
 
 ## Security Notes
 
-- All host mounts are **read-only**. The only writable path is `./output/`.
-- Scan data is sent to the Anthropic API for AI analysis. Use `--no-ai` for air-gapped or regulated environments.
+- Host bind mounts are **read-only**; reports are written to `./output/`, and temporary scanner files use the container/local temporary directory. The container root filesystem is writable.
+- Scan data is sent to the Anthropic API for AI analysis. `--no-ai` disables Claude calls only. The packages module still sends selected package names/versions to OSV.dev; skip `packages` to avoid those lookups. Local network probes and DNS may still occur. Do not assume this mode is air-gapped.
 - Reports contain detailed host configuration — treat them like passwords. Don't commit to public repos.
 - This tool is for **authorized use only** on systems you own or have permission to assess.
 
@@ -399,4 +402,10 @@ AI failures preserve collected scanner evidence and use an unavailable module
 risk score. HTML and Markdown reports identify the failure, and the CLI saves
 the reports before exiting with status 1. Permanent authentication or billing
 errors still stop AI processing immediately with status 1. A successful
-`--no-ai` scan retains its existing scanner-only behavior.
+`--no-ai` scan retains scanner-only reporting (including OSV lookups in the packages module).
+AI response shapes, severity values, and scores are validated before use. AI
+finding IDs are prefixed with the module name so synthesis references remain
+unambiguous across modules. Reports include raw scanner evidence as well as
+findings; treat both as sensitive.
+
+For the verified fixes and validation coverage, see [review notes](docs/review-fixes.md).

@@ -8,9 +8,9 @@ from assessment.config import ANTHROPIC_API_KEY, DEFAULT_MODEL, OUTPUT_DIR
 from assessment.scanners import ALL_SCANNERS
 from assessment.runner import validate_host_mounts, collect_host_context, run_scanners, get_scan_timestamp
 from assessment.ai.analyzer import Analyzer, build_report
+from assessment.ai.errors import InsufficientCreditsError
 from assessment.reports.markdown import generate_markdown
 from assessment.reports.html import generate_html
-from assessment.models import Report
 from assessment.config import SEVERITY_ORDER
 from assessment import __version__
 
@@ -43,34 +43,24 @@ def main(modules, skip, output_dir, fmt, model, no_ai, severity, verbose):
     click.echo(click.style("║   HOST VULNERABILITY ASSESSMENT TOOL     ║", fg="cyan"))
     click.echo(click.style("╚══════════════════════════════════════════╝\n", fg="cyan"))
 
-    # Validate API key if AI enabled
+    # Validate the requested work before collecting host data.
+    all_module_names = list(ALL_SCANNERS)
+    requested = all_module_names if modules == "all" else [m.strip() for m in modules.split(",") if m.strip()]
+    skip_list = [m.strip() for m in skip.split(",") if m.strip()]
+    invalid = [m for m in requested + skip_list if m not in ALL_SCANNERS]
+    if invalid:
+        raise click.ClickException(f"Unknown modules: {invalid}. Available: {', '.join(all_module_names)}")
+    selected = list(dict.fromkeys(m for m in requested if m not in skip_list))
+    if not selected:
+        raise click.ClickException("No scanner modules selected")
+
     api_key = os.environ.get("ANTHROPIC_API_KEY", ANTHROPIC_API_KEY)
     if not no_ai and not api_key:
-        click.echo(click.style(
-            "ERROR: ANTHROPIC_API_KEY not set. Use --no-ai to skip AI analysis.",
-            fg="red"
-        ))
-        sys.exit(1)
+        raise click.ClickException("ANTHROPIC_API_KEY not set. Use --no-ai to skip AI analysis.")
 
-    # Validate host mounts
     mount_warnings = validate_host_mounts()
     for warning in mount_warnings:
         click.echo(click.style(f"WARNING: {warning}", fg="yellow"))
-
-    # Determine module list
-    all_module_names = list(ALL_SCANNERS.keys())
-    if modules == "all":
-        selected = all_module_names
-    else:
-        selected = [m.strip() for m in modules.split(",") if m.strip()]
-        invalid = [m for m in selected if m not in ALL_SCANNERS]
-        if invalid:
-            click.echo(click.style(f"ERROR: Unknown modules: {invalid}", fg="red"))
-            click.echo(f"Available: {', '.join(all_module_names)}")
-            sys.exit(1)
-
-    skip_list = [m.strip() for m in skip.split(",") if m.strip()]
-    selected = [m for m in selected if m not in skip_list]
 
     # Ensure output dir exists
     os.makedirs(output_dir, exist_ok=True)
@@ -103,17 +93,19 @@ def main(modules, skip, output_dir, fmt, model, no_ai, severity, verbose):
 
     # AI Analysis
     if not no_ai:
-        from assessment.ai.client import AIClient, InsufficientCreditsError
-
         click.echo(click.style("\n► Running AI analysis (Claude)...", fg="blue"))
-        client = AIClient(model=model, api_key=api_key)
-        analyzer = Analyzer(client=client, host_context=host_context)
-
+        phase = "AI initialization"
         try:
+            from assessment.ai.client import AIClient
+
+            client = AIClient(model=model, api_key=api_key)
+            analyzer = Analyzer(client=client, host_context=host_context)
+            phase = "AI module analysis"
             click.echo("  Analyzing modules...")
             module_results = analyzer.analyze_modules(module_results)
 
             click.echo("  Running synthesis...")
+            phase = "AI synthesis"
             synthesis = analyzer.synthesize(module_results)
         except InsufficientCreditsError as e:
             click.echo(click.style(f"\nERROR: {e}", fg="red"))
@@ -123,7 +115,16 @@ def main(modules, skip, output_dir, fmt, model, no_ai, severity, verbose):
             ))
             sys.exit(1)
         except Exception as e:  # noqa: BLE001 - save scanner evidence when synthesis fails
-            synthesis = {"error": str(e)}
+            detail = str(e)
+            if isinstance(e, ImportError):
+                detail += ". Install AI support with: pip install '1200km-auditai[ai]'"
+            synthesis = {"error": f"{phase} failed: {detail}"}
+            if phase == "AI initialization":
+                for mr in module_results:
+                    if not mr.error:
+                        mr.error = synthesis["error"]
+                        mr.module_risk_score = None
+                        mr.module_summary = "AI analysis unavailable"
     else:
         click.echo(click.style("\n► Skipping AI analysis (--no-ai)", fg="yellow"))
         synthesis = {
@@ -171,7 +172,7 @@ def main(modules, skip, output_dir, fmt, model, no_ai, severity, verbose):
     click.echo("  Overall Risk: " + click.style(f"{report.overall_risk_rating} ({score})", fg=risk_color))
     if report.lynis_score is not None:
         click.echo(f"  Lynis Hardening Index: {report.lynis_score}/100")
-    click.echo(f"  Findings:")
+    click.echo("  Findings:")
     click.echo(f"    {click.style(str(counts.get('CRITICAL', 0)), fg='red')} Critical  "
                f"{click.style(str(counts.get('HIGH', 0)), fg='yellow')} High  "
                f"{click.style(str(counts.get('MEDIUM', 0)), fg='yellow')} Medium  "

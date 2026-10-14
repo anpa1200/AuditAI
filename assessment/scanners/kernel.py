@@ -6,17 +6,6 @@ from assessment.config import PROC_PATH, SYS_PATH
 
 logger = logging.getLogger(__name__)
 
-# Known EOL kernels (simplified - major version series)
-EOL_KERNEL_SERIES = {
-    "2.6", "3.0", "3.1", "3.2", "3.3", "3.4", "3.5", "3.6", "3.7",
-    "3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14", "3.15",
-    "3.16", "3.17", "3.18", "3.19", "4.0", "4.1", "4.2", "4.3",
-    "4.4", "4.5", "4.6", "4.7", "4.8", "4.9", "4.10", "4.11",
-    "4.12", "4.13", "4.14", "4.15", "4.16", "4.17", "4.18", "4.19",
-    "4.20", "5.0", "5.1", "5.2", "5.3", "5.4", "5.5", "5.6",
-    "5.7", "5.8", "5.9", "5.10", "5.11", "5.12", "5.13", "5.14",
-    "5.15", "5.16", "5.17", "5.18", "5.19",
-}
 
 
 class KernelScanner(BaseScanner):
@@ -56,7 +45,11 @@ def _get_kernel_version() -> dict:
             if len(ver_parts) >= 2:
                 series = f"{ver_parts[0]}.{ver_parts[1]}"
                 result["series"] = series
-                result["eol"] = series in EOL_KERNEL_SERIES
+                result["eol"] = None
+                result["support_note"] = (
+                    "Support cannot be inferred from kernel series alone; "
+                    "distribution kernels may receive backported security updates."
+                )
     except Exception as e:
         result["error"] = str(e)
     return result
@@ -93,13 +86,13 @@ def _check_cpu_vulnerabilities() -> dict:
                 mitigation = content.lower()
                 result[vuln] = {
                     "status": content,
-                    "mitigated": not any(
-                        word in mitigation
-                        for word in ["vulnerable", "not affected by this cpu"]
-                    ) or "mitigation" in mitigation or "not affected" in mitigation,
+                    "mitigated": "vulnerable" not in mitigation and (
+                        mitigation.startswith("mitigation:") or mitigation.startswith("not affected")
+                    ),
                 }
-            except Exception:
-                pass
+            except Exception as e:
+                result[vuln] = {"status": "unknown", "mitigated": None,
+                                "error": str(e) or type(e).__name__}
     except Exception as e:
         result["error"] = str(e)
     return result
@@ -111,10 +104,13 @@ def _check_lockdown() -> dict:
         try:
             with open(lockdown_path) as f:
                 content = f.read().strip()
-            return {"enabled": True, "level": content}
+            active = next((part[1:-1] for part in content.split()
+                           if part.startswith("[") and part.endswith("]")), None)
+            return {"enabled": active in {"integrity", "confidentiality"},
+                    "level": content, "active_level": active}
         except Exception:
-            return {"enabled": True, "error": "unreadable"}
-    return {"enabled": False}
+            return {"enabled": None, "error": "unreadable"}
+    return {"enabled": None, "status": "lockdown state not available"}
 
 
 def _check_modules_disabled() -> dict:

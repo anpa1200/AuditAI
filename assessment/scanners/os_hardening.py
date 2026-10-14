@@ -3,7 +3,7 @@ import subprocess
 import logging
 from assessment.scanners.base import BaseScanner
 from assessment.config import (
-    ETC_PATH, PROC_PATH, SYS_PATH, BOOT_PATH, SYSCTL_CHECKS
+    ETC_PATH, PROC_PATH, SYS_PATH, BOOT_PATH, HOST_ROOT, SYSCTL_CHECKS
 )
 
 logger = logging.getLogger(__name__)
@@ -45,6 +45,9 @@ def _check_sysctl() -> dict:
                 "description": description,
             }
         except Exception:
+            if HOST_ROOT and HOST_ROOT != "/":
+                results[param] = {"error": "host value not readable", "expected": str(expected)}
+                continue
             # Try via sysctl command
             try:
                 out = subprocess.check_output(
@@ -122,7 +125,7 @@ def _check_selinux() -> dict:
 
 
 def _check_secure_boot() -> dict:
-    efi_path = "/sys/firmware/efi/efivars"
+    efi_path = os.path.join(SYS_PATH, "firmware", "efi", "efivars")
     if not os.path.exists(efi_path):
         return {"status": "EFI not present (legacy boot or no EFI vars)"}
     try:

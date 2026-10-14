@@ -3,7 +3,7 @@ import stat
 import logging
 from assessment.scanners.base import BaseScanner
 from assessment.config import (
-    HOST_ROOT, ETC_PATH, HOME_PATH, TMP_PATH, KNOWN_SUID_BINARIES
+    HOST_ROOT, ETC_PATH, KNOWN_SUID_BINARIES
 )
 
 logger = logging.getLogger(__name__)
@@ -76,7 +76,7 @@ def _find_suid_sgid() -> dict:
                             suid_files.append(entry)
                             if orig_path not in KNOWN_SUID_BINARIES:
                                 unknown_suid.append(entry)
-                        elif mode & stat.S_ISGID and stat.S_ISREG(mode):
+                        if mode & stat.S_ISGID and stat.S_ISREG(mode):
                             sgid_files.append({
                                 "path": orig_path,
                                 "mode": oct(mode & 0o7777),
@@ -200,7 +200,7 @@ def _check_sensitive_files() -> dict:
                 result[path] = {
                     "actual_mode": oct(actual_mode),
                     "expected_max_mode": oct(expected_mode),
-                    "too_permissive": actual_mode > expected_mode,
+                    "too_permissive": bool(actual_mode & ~expected_mode),
                     "owner_uid": st.st_uid,
                 }
             except Exception as e:
@@ -278,7 +278,7 @@ def _check_ssh_key_perms() -> dict:
                 result[f"/etc/ssh/{fname}"] = {
                     "mode": oct(mode),
                     "is_private": "key" in fname and "pub" not in fname,
-                    "too_permissive": (mode & 0o077) != 0,
+                    "too_permissive": bool(mode & (0o022 if fname.endswith(".pub") else 0o077)),
                 }
             except Exception:
                 pass

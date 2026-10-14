@@ -35,13 +35,15 @@ def collect_host_context() -> dict:
     # OS info
     os_info = {}
     os_release = os.path.join(ETC_PATH, "os-release")
-    if os.path.exists(os_release):
+    try:
         with open(os_release) as f:
             for line in f:
                 line = line.strip()
                 if "=" in line and not line.startswith("#"):
                     k, v = line.split("=", 1)
                     os_info[k] = v.strip('"')
+    except OSError as e:
+        logger.warning("Could not read host OS information: %s", e)
     ctx["os_info"] = os_info
     ctx["os_name"] = os_info.get("PRETTY_NAME", os_info.get("NAME", "Linux"))
     ctx["os_version"] = os_info.get("VERSION_ID", "")
@@ -60,59 +62,33 @@ def run_scanners(
     modules: list[str],
     verbose: bool = False,
 ) -> list[ModuleResult]:
-    """Run the specified scanner modules in parallel (lynis runs first, sequentially)."""
+    """Run the specified scanner modules in parallel and preserve failures."""
 
-    # Run lynis first since it's slow and other modules don't depend on it
     results = []
-    parallel_modules = [m for m in modules if m != "lynis"]
-    lynis_modules = [m for m in modules if m == "lynis"]
 
-    # Start lynis in background thread while others run
-    lynis_future = None
-    executor = ThreadPoolExecutor(max_workers=6)
-
-    futures = {}
-    for module_name in parallel_modules:
+    def run_module(module_name):
         scanner_cls = ALL_SCANNERS.get(module_name)
-        if not scanner_cls:
-            logger.warning(f"Unknown scanner: {module_name}")
-            continue
-        scanner = scanner_cls()
-        logger.info(f"Starting scanner: {module_name}")
-        futures[executor.submit(scanner.run)] = module_name
+        if scanner_cls is None:
+            raise ValueError(f"Unknown scanner: {module_name}")
+        return scanner_cls().run()
 
-    if lynis_modules:
-        scanner_cls = ALL_SCANNERS["lynis"]
-        scanner = scanner_cls()
-        logger.info("Starting lynis scanner (may take several minutes)...")
-        lynis_future = executor.submit(scanner.run)
-
-    # Collect parallel results
-    for future in as_completed(futures):
-        module_name = futures[future]
-        try:
-            result = future.result()
-            if verbose:
-                logger.info(
-                    f"Completed {module_name}: "
-                    f"{len(result.findings)} raw findings, "
-                    f"{result.duration_seconds:.1f}s"
-                )
-            results.append(result)
-        except Exception as e:
-            logger.error(f"Scanner {module_name} raised exception: {e}")
-            results.append(ModuleResult(module_name, [], {}, None, "Scanner failed", 0, str(e)))
-
-    # Wait for lynis
-    if lynis_future:
-        try:
-            lynis_result = lynis_future.result()
-            results.append(lynis_result)
-        except Exception as e:
-            logger.error(f"Lynis scanner failed: {e}")
-            results.append(ModuleResult("lynis", [], {}, None, "Scanner failed", 0, str(e)))
-
-    executor.shutdown(wait=False)
+    # Collect constructor and worker failures alike; always release the pool.
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = {executor.submit(run_module, name): name for name in modules}
+        for future in as_completed(futures):
+            module_name = futures[future]
+            try:
+                result = future.result()
+                if verbose:
+                    logger.info(
+                        "Completed %s: %s raw findings, %.1fs",
+                        module_name, len(result.findings), result.duration_seconds,
+                    )
+                results.append(result)
+            except Exception as e:
+                logger.error("Scanner %s raised exception: %s", module_name, e)
+                results.append(ModuleResult(module_name, [], {}, None, "Scanner failed", 0,
+                                            str(e) or type(e).__name__))
 
     # Sort by original module order
     module_order = {m: i for i, m in enumerate(modules)}

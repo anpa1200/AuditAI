@@ -1,9 +1,8 @@
 import subprocess
 import socket
 import logging
-import re
 from assessment.scanners.base import BaseScanner
-from assessment.config import ETC_PATH, PROC_PATH
+from assessment.config import ETC_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -45,11 +44,9 @@ def _get_hostname() -> str:
 
 def _get_primary_ip() -> str:
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
     except Exception:
         return ""
 

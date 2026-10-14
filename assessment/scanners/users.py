@@ -2,7 +2,7 @@ import os
 import subprocess
 import logging
 from assessment.scanners.base import BaseScanner
-from assessment.config import ETC_PATH, HOME_PATH
+from assessment.config import ETC_PATH, HOME_PATH, HOST_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +161,7 @@ def _read_ssh_server_config() -> dict:
 def _check_user_ssh_keys() -> dict:
     result = {}
     # Check root
-    root_ssh = "/root/.ssh"
+    root_ssh = os.path.join(HOST_ROOT or "/", "root", ".ssh")
     if os.path.isdir(root_ssh):
         auth_keys = os.path.join(root_ssh, "authorized_keys")
         if os.path.exists(auth_keys):
@@ -180,7 +180,7 @@ def _check_user_ssh_keys() -> dict:
         if os.path.isdir(HOME_PATH):
             home_base = HOME_PATH
         else:
-            home_base = "/home"
+            return result
         for user_dir in os.listdir(home_base):
             auth_keys = os.path.join(home_base, user_dir, ".ssh", "authorized_keys")
             if os.path.exists(auth_keys):
@@ -200,14 +200,11 @@ def _check_user_ssh_keys() -> dict:
 def _check_legacy_files() -> dict:
     result = {}
     legacy_files = [".rhosts", ".netrc", ".shosts"]
-    check_dirs = ["/root"]
+    check_dirs = [os.path.join(HOST_ROOT or "/", "root")]
     try:
         if os.path.isdir(HOME_PATH):
             for d in os.listdir(HOME_PATH):
                 check_dirs.append(os.path.join(HOME_PATH, d))
-        else:
-            for d in os.listdir("/home"):
-                check_dirs.append(os.path.join("/home", d))
     except Exception:
         pass
 

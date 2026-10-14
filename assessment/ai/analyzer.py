@@ -5,6 +5,7 @@ from assessment.models import ModuleResult, Finding, AttackChain, Report
 from assessment.ai.prompts import MODULE_ANALYSIS_PROMPT, SYNTHESIS_PROMPT
 from assessment.ai.preprocessor import preprocess
 from assessment.ai.errors import InsufficientCreditsError
+from assessment.ai.validation import validate_module, validate_synthesis
 
 logger = logging.getLogger(__name__)
 
@@ -72,18 +73,19 @@ class Analyzer:
 
         response = self.client.analyze(prompt, max_tokens=8192)
 
-        if response.get("error"):
+        if isinstance(response, dict) and response.get("error"):
             mr.error = f"AI analysis failed: {response['error']}"
             mr.module_risk_score = None
             mr.module_summary = "AI analysis failed"
             logger.error("Module %s: %s", mr.module_name, mr.error)
             return mr
 
+        validate_module(response)
         findings = []
         for f in response.get("findings", []):
             try:
                 findings.append(Finding(
-                    id=f.get("id", f"finding_{len(findings)}"),
+                    id=f"{mr.module_name}:{f['id']}",
                     title=f.get("title", "Untitled"),
                     severity=f.get("severity", "INFO"),
                     category=mr.module_name,
@@ -166,6 +168,18 @@ def build_report(
     host_context: dict,
     scan_timestamp: str,
 ) -> Report:
+    if not isinstance(synthesis, dict) or not synthesis.get("error"):
+        try:
+            validate_synthesis(synthesis)
+            known_ids = {f.id for mr in module_results for f in mr.findings}
+            referenced_ids = set(synthesis["top_10_priorities"])
+            for chain in synthesis["attack_chains"]:
+                referenced_ids.update(chain["findings_involved"])
+            if referenced_ids - known_ids:
+                raise ValueError("Synthesis references unknown finding IDs")
+        except ValueError as exc:
+            synthesis = {"error": f"Invalid AI synthesis response: {exc}"}
+
     attack_chains = []
     for chain in synthesis.get("attack_chains", []):
         attack_chains.append(AttackChain(

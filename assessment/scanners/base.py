@@ -29,10 +29,10 @@ class BaseScanner(ABC):
                 module_name=self.name,
                 findings=[],
                 raw_output={"error": str(e)},
-                module_risk_score=0,
+                module_risk_score=None,
                 module_summary=f"Scanner failed: {e}",
                 duration_seconds=duration,
-                error=str(e),
+                error=str(e) or type(e).__name__,
             )
 
     @abstractmethod

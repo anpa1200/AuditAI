@@ -3,7 +3,7 @@ import subprocess
 import glob
 import logging
 from assessment.scanners.base import BaseScanner
-from assessment.config import ETC_PATH, RUN_PATH, PROC_PATH
+from assessment.config import ETC_PATH, RUN_PATH, VAR_PATH, HOST_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,8 @@ class ServicesScanner(BaseScanner):
 def _get_systemd_units() -> list[dict]:
     """List systemd service units via systemctl, falling back to filesystem scan
     when running inside a Docker container where systemctl is unavailable."""
+    if HOST_ROOT and HOST_ROOT != "/":
+        return _get_systemd_units_from_fs()
     try:
         out = subprocess.check_output(
             ["systemctl", "list-units", "--type=service", "--all",
@@ -159,7 +161,7 @@ def _get_cron_jobs() -> dict:
                     pass
 
     # User cron spool
-    spool_dir = "/var/spool/cron"
+    spool_dir = os.path.join(VAR_PATH, "spool", "cron")
     if os.path.isdir(spool_dir):
         try:
             for user in os.listdir(spool_dir):
@@ -173,7 +175,7 @@ def _get_cron_jobs() -> dict:
 
 
 def _check_docker_socket() -> dict:
-    socket_path = "/var/run/docker.sock"
+    socket_path = os.path.join(RUN_PATH, "docker.sock")
     result = {"path": socket_path, "exists": False}
     if os.path.exists(socket_path):
         result["exists"] = True
@@ -182,7 +184,8 @@ def _check_docker_socket() -> dict:
         result["owner_uid"] = st.st_uid
         result["owner_gid"] = st.st_gid
         # World-readable docker socket is a critical finding
-        result["world_readable"] = bool(st.st_mode & 0o006)
+        result["world_readable"] = bool(st.st_mode & 0o004)
+        result["world_writable"] = bool(st.st_mode & 0o002)
     return result
 
 

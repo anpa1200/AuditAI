@@ -1,6 +1,7 @@
 import os
 import subprocess
 import logging
+import tempfile
 from assessment.scanners.base import BaseScanner
 from assessment.config import HOST_ROOT
 
@@ -18,22 +19,20 @@ class LynisScanner(BaseScanner):
         # Run lynis if available
         lynis_path = _find_lynis()
         if not lynis_path:
-            result["status"] = "lynis not found in PATH"
-            return result, []
+            raise RuntimeError("lynis not found in PATH")
 
-        result["status"] = "running"
-        exit_code, output = _run_lynis(lynis_path)
-        result["exit_code"] = exit_code
-        result["output_tail"] = output[-3000:] if len(output) > 3000 else output
-
-        # Parse report
-        if os.path.exists(LYNIS_REPORT_PATH):
-            report = _parse_lynis_report(LYNIS_REPORT_PATH)
-            result.update(report)
+        # A private per-run directory avoids stale reports and symlink collisions.
+        with tempfile.TemporaryDirectory(prefix="auditai-lynis-") as report_dir:
+            report_path = os.path.join(report_dir, "report.dat")
+            exit_code, output = _run_lynis(lynis_path, report_path)
+            if exit_code != 0:
+                raise RuntimeError(f"lynis failed (exit {exit_code}): {output[-3000:]}")
+            if not os.path.isfile(report_path):
+                raise RuntimeError("lynis completed without a report file")
+            result.update(_parse_lynis_report(report_path))
+            result["exit_code"] = exit_code
+            result["output_tail"] = output[-3000:]
             result["status"] = "completed"
-        else:
-            result["status"] = "completed (no report file)"
-
         return result, []
 
 
@@ -50,11 +49,11 @@ def _find_lynis() -> str:
         return ""
 
 
-def _run_lynis(lynis_path: str) -> tuple[int, str]:
+def _run_lynis(lynis_path: str, report_path: str = LYNIS_REPORT_PATH) -> tuple[int, str]:
     cmd = [
         lynis_path, "audit", "system",
         "--no-colors", "--quiet", "--quick",
-        f"--report-file={LYNIS_REPORT_PATH}",
+        f"--report-file={report_path}",
     ]
     if HOST_ROOT and HOST_ROOT != "/":
         cmd.extend(["--rootdir", HOST_ROOT])
@@ -105,7 +104,7 @@ def _parse_lynis_report(path: str) -> dict:
                     report["suggestions"].append(value)
                 elif key.startswith("test_name["):
                     test_id = key[10:-1]
-                    report["test_results"][test_id] = {"name": value}
+                    report["test_results"].setdefault(test_id, {})["name"] = value
                 elif key.startswith("test_result["):
                     test_id = key[12:-1]
                     if test_id not in report["test_results"]:
@@ -115,7 +114,7 @@ def _parse_lynis_report(path: str) -> dict:
                     report["details"][key] = value
 
     except Exception as e:
-        logger.warning(f"Failed to parse lynis report: {e}")
+        raise RuntimeError(f"Failed to parse lynis report: {e}") from e
 
     # Summarize
     report["warning_count"] = len(report["warnings"])

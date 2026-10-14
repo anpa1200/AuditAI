@@ -30,7 +30,7 @@ def _is_fatal_api_error(exc: Exception) -> bool:
 class AIClient:
     def __init__(self, model: str = DEFAULT_MODEL, api_key: str = ""):
         self.model = model
-        self.client = Anthropic(api_key=api_key or ANTHROPIC_API_KEY)
+        self.client = Anthropic(api_key=api_key or ANTHROPIC_API_KEY, max_retries=0, timeout=60.0)
 
     def analyze(self, prompt: str, max_tokens: int = 4096) -> dict:
         """Send a prompt and return parsed JSON response."""
@@ -43,12 +43,19 @@ class AIClient:
                     messages=[{"role": "user", "content": prompt}],
                     temperature=0,
                 )
+                if getattr(response, "stop_reason", None) == "max_tokens":
+                    raise ValueError("AI response exceeded the token limit")
+                if not response.content or not isinstance(getattr(response.content[0], "text", None), str):
+                    raise ValueError("AI response has no text content")
                 content = response.content[0].text.strip()
                 # Strip markdown code fences if present
                 if content.startswith("```"):
                     lines = content.splitlines()
                     content = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
-                return json.loads(content)
+                parsed = json.loads(content)
+                if not isinstance(parsed, dict):
+                    raise ValueError("AI response must be a JSON object")
+                return parsed
 
             except AuthenticationError as e:
                 raise InsufficientCreditsError(
@@ -58,13 +65,14 @@ class AIClient:
             except RateLimitError:
                 wait = RETRY_DELAY * (2 ** attempt)
                 logger.warning(f"Rate limited, waiting {wait}s (attempt {attempt+1}/{MAX_RETRIES})")
-                time.sleep(wait)
+                if attempt < MAX_RETRIES - 1:
+                    time.sleep(wait)
 
-            except json.JSONDecodeError as e:
-                logger.error(f"JSON decode error: {e}")
+            except ValueError as e:
+                logger.error(f"Invalid AI response: {e}")
                 if attempt == MAX_RETRIES - 1:
                     return {
-                        "error": f"JSON decode failed: {e}",
+                        "error": f"Invalid AI response: {e}",
                         "module_risk_score": None,
                         "module_summary": "AI analysis failed",
                     }

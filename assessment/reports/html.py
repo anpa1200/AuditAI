@@ -1,7 +1,8 @@
-import os
 import json
-from assessment.models import Report
+
 from assessment.config import SEVERITY_ORDER
+from assessment.models import Report
+from assessment.reports.writer import write_report
 
 SEVERITY_COLOR = {
     "CRITICAL": "#dc2626",
@@ -35,7 +36,7 @@ def generate_html(report: Report, output_dir: str) -> str:
         color = SEVERITY_COLOR.get(f.severity, "#6b7280")
         findings_rows += f"""
         <tr>
-          <td><span class="badge" style="background:{color}">{f.severity}</span></td>
+          <td><span class="badge" style="background:{color}">{_esc(f.severity)}</span></td>
           <td><strong>{_esc(f.title)}</strong></td>
           <td>{_esc(f.category)}</td>
           <td>{_esc(f.description[:200])}</td>
@@ -48,15 +49,19 @@ def generate_html(report: Report, output_dir: str) -> str:
     for mr in report.module_results:
         module_score = "unavailable" if mr.module_risk_score is None else f"{mr.module_risk_score}/100"
         error_html = f'<div class="error-box">Module failed: {_esc(mr.error)}</div>' if mr.error else ""
+        raw_html = ""
+        if mr.raw_output:
+            raw_json = json.dumps(mr.raw_output, indent=2, ensure_ascii=False, default=str)
+            raw_html = f"<details><summary>Raw scanner output</summary><pre>{_esc(raw_json)}</pre></details>"
         findings_html = ""
         if mr.findings:
             sorted_findings = sorted(mr.findings, key=lambda f: SEVERITY_ORDER.get(f.severity, 99))
             for f in sorted_findings:
                 color = SEVERITY_COLOR.get(f.severity, "#6b7280")
                 findings_html += f"""
-                <div class="finding-card" data-severity="{f.severity}">
+                <div class="finding-card" data-severity="{_esc(f.severity)}">
                   <div class="finding-header">
-                    <span class="badge" style="background:{color}">{f.severity}</span>
+                    <span class="badge" style="background:{color}">{_esc(f.severity)}</span>
                     <strong>{_esc(f.title)}</strong>
                   </div>
                   <p>{_esc(f.description)}</p>
@@ -70,7 +75,7 @@ def generate_html(report: Report, output_dir: str) -> str:
         module_sections += f"""
         <div class="module-section">
           <div class="module-header" onclick="toggleSection(this)">
-            <span class="module-title">{mr.module_name.replace("_", " ").title()}</span>
+            <span class="module-title">{_esc(mr.module_name.replace("_", " ").title())}</span>
             <div class="module-meta">
               <span class="risk-score">Risk: {module_score}</span>
               <span class="finding-count">{len(mr.findings)} findings</span>
@@ -82,6 +87,7 @@ def generate_html(report: Report, output_dir: str) -> str:
             {error_html}
             <p class="module-summary">{_esc(mr.module_summary)}</p>
             {findings_html}
+            {raw_html}
           </div>
         </div>"""
 
@@ -95,8 +101,8 @@ def generate_html(report: Report, output_dir: str) -> str:
         <div class="attack-chain">
           <h4>{_esc(chain.title)}</h4>
           <div class="chain-badges">
-            <span class="badge" style="background:{likelihood_color}">Likelihood: {chain.likelihood}</span>
-            <span class="badge" style="background:{impact_color}">Impact: {chain.impact}</span>
+            <span class="badge" style="background:{likelihood_color}">Likelihood: {_esc(chain.likelihood)}</span>
+            <span class="badge" style="background:{impact_color}">Impact: {_esc(chain.impact)}</span>
           </div>
           <ol>{steps_html}</ol>
           <p><strong>Related findings:</strong> {", ".join(f"<code>{_esc(f)}</code>" for f in chain.findings_involved)}</p>
@@ -117,7 +123,7 @@ def generate_html(report: Report, output_dir: str) -> str:
             priorities_html += f"""
             <div class="priority-item">
               <span class="priority-num">{i}</span>
-              <span class="badge" style="background:{color}">{f.severity}</span>
+              <span class="badge" style="background:{color}">{_esc(f.severity)}</span>
               <strong>{_esc(f.title)}</strong>
               <span class="category-tag">{_esc(f.category)}</span>
             </div>"""
@@ -183,6 +189,7 @@ th {{ background: #0f172a; padding: 10px 12px; text-align: left; color: #94a3b8;
 td {{ padding: 10px 12px; border-bottom: 1px solid #1e293b; vertical-align: top; }}
 tr:hover td {{ background: #1a2740; }}
 code {{ background: #1e293b; padding: 1px 6px; border-radius: 4px; font-size: 0.8rem; color: #a5f3fc; word-break: break-all; }}
+pre {{ white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.85rem; }}
 .executive-summary {{ color: #cbd5e1; white-space: pre-wrap; }}
 ol, ul {{ padding-left: 20px; color: #cbd5e1; }}
 ol li, ul li {{ margin-bottom: 6px; }}
@@ -198,11 +205,11 @@ ol li, ul li {{ margin-bottom: 6px; }}
   <h1>🔒 Host Vulnerability Assessment Report</h1>
   <div>
     {report_error}
-    <span class="risk-badge">{report.overall_risk_rating} RISK — {score}</span>
+    <span class="risk-badge">{_esc(report.overall_risk_rating)} RISK — {score}</span>
   </div>
   <div class="header-meta">
     <span>🖥️ <strong>{_esc(report.hostname)}</strong></span>
-    <span>🕒 {report.scan_timestamp}</span>
+    <span>🕒 {_esc(report.scan_timestamp)}</span>
     <span>🐧 {_esc(report.os_info.get('PRETTY_NAME', 'Unknown OS'))}</span>
     {"<span>🛡️ Lynis: " + str(report.lynis_score) + "/100</span>" if report.lynis_score is not None else ""}
   </div>
@@ -278,10 +285,7 @@ function filterFindings(severity, btn) {{
 </body>
 </html>"""
 
-    path = os.path.join(output_dir, f"report_{report.scan_timestamp.replace(':', '-')}.html")
-    with open(path, "w") as f:
-        f.write(html)
-    return path
+    return write_report(output_dir, report.scan_timestamp, "html", html)
 
 
 def _esc(text: str) -> str:
