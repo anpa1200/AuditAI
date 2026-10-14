@@ -1,9 +1,9 @@
+from typing import Any
 import subprocess
 import socket
 import logging
-import re
 from assessment.scanners.base import BaseScanner
-from assessment.config import ETC_PATH, PROC_PATH
+from assessment.config import ETC_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 class NetworkScanner(BaseScanner):
     name = "network"
 
-    def _scan(self) -> tuple[dict, list]:
-        result = {}
+    def _scan(self) -> tuple[dict[str, Any], list]:
+        result: dict[str, Any] = {}
 
         result["hostname"] = _get_hostname()
         result["interfaces"] = _get_interfaces()
@@ -45,16 +45,14 @@ def _get_hostname() -> str:
 
 def _get_primary_ip() -> str:
     try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
     except Exception:
         return ""
 
 
-def _get_interfaces() -> list[dict]:
+def _get_interfaces() -> list[dict[str, Any]]:
     try:
         out = subprocess.check_output(
             ["ip", "-j", "addr"], text=True, timeout=10
@@ -76,7 +74,7 @@ def _get_open_ports_ss() -> str:
         return ""
 
 
-def _run_nmap(target: str) -> dict:
+def _run_nmap(target: str) -> dict[str, Any]:
     try:
         cmd = [
             "nmap", "-sS", "-sV", "--top-ports", "1000",
@@ -100,8 +98,8 @@ def _run_nmap(target: str) -> dict:
             return {"error": str(e2), "target": target}
 
 
-def _get_iptables() -> dict:
-    result = {}
+def _get_iptables() -> dict[str, Any]:
+    result: dict[str, Any] = {}
     for table in ["filter", "nat", "mangle"]:
         try:
             out = subprocess.check_output(
@@ -139,8 +137,8 @@ def _read_nftables() -> str:
         return ""
 
 
-def _read_ufw() -> dict:
-    result = {}
+def _read_ufw() -> dict[str, Any]:
+    result: dict[str, Any] = {}
     ufw_paths = [
         f"{ETC_PATH}/ufw/user.rules",
         f"{ETC_PATH}/ufw/user6.rules",

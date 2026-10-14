@@ -1,9 +1,10 @@
+from typing import Any
 import os
 import stat
 import logging
 from assessment.scanners.base import BaseScanner
 from assessment.config import (
-    HOST_ROOT, ETC_PATH, HOME_PATH, TMP_PATH, KNOWN_SUID_BINARIES
+    HOST_ROOT, ETC_PATH, KNOWN_SUID_BINARIES
 )
 
 logger = logging.getLogger(__name__)
@@ -17,8 +18,8 @@ SCAN_DIRS = ["/bin", "/sbin", "/usr/bin", "/usr/sbin", "/usr/local/bin",
 class FilesystemScanner(BaseScanner):
     name = "filesystem"
 
-    def _scan(self) -> tuple[dict, list]:
-        result = {}
+    def _scan(self) -> tuple[dict[str, Any], list]:
+        result: dict[str, Any] = {}
         result["suid_sgid_files"] = _find_suid_sgid()
         result["world_writable_dirs"] = _find_world_writable_dirs()
         result["world_writable_files"] = _find_world_writable_files()
@@ -39,7 +40,7 @@ def _get_host_path(path: str) -> str:
     return path
 
 
-def _find_suid_sgid() -> dict:
+def _find_suid_sgid() -> dict[str, Any]:
     suid_files = []
     sgid_files = []
     unknown_suid = []
@@ -76,7 +77,7 @@ def _find_suid_sgid() -> dict:
                             suid_files.append(entry)
                             if orig_path not in KNOWN_SUID_BINARIES:
                                 unknown_suid.append(entry)
-                        elif mode & stat.S_ISGID and stat.S_ISREG(mode):
+                        if mode & stat.S_ISGID and stat.S_ISREG(mode):
                             sgid_files.append({
                                 "path": orig_path,
                                 "mode": oct(mode & 0o7777),
@@ -95,7 +96,7 @@ def _find_suid_sgid() -> dict:
     }
 
 
-def _find_world_writable_dirs() -> list[dict]:
+def _find_world_writable_dirs() -> list[dict[str, Any]]:
     results = []
     skip_dirs = {"/proc", "/sys", "/dev"}
 
@@ -131,7 +132,7 @@ def _find_world_writable_dirs() -> list[dict]:
     return results[:100]  # Cap
 
 
-def _find_world_writable_files() -> list[dict]:
+def _find_world_writable_files() -> list[dict[str, Any]]:
     results = []
     system_dirs = ["/etc", "/usr/bin", "/usr/sbin", "/bin", "/sbin"]
 
@@ -161,8 +162,8 @@ def _find_world_writable_files() -> list[dict]:
     return results
 
 
-def _check_tmp_perms() -> dict:
-    result = {}
+def _check_tmp_perms() -> dict[str, Any]:
+    result: dict[str, Any] = {}
     for tmp_dir in ["/tmp", "/var/tmp", "/dev/shm"]:
         host_tmp = _get_host_path(tmp_dir)
         if os.path.exists(host_tmp):
@@ -179,7 +180,7 @@ def _check_tmp_perms() -> dict:
     return result
 
 
-def _check_sensitive_files() -> dict:
+def _check_sensitive_files() -> dict[str, Any]:
     sensitive = {
         "/etc/passwd": 0o644,
         "/etc/shadow": 0o640,
@@ -190,7 +191,7 @@ def _check_sensitive_files() -> dict:
         "/etc/ssh/sshd_config": 0o600,
         "/boot/grub/grub.cfg": 0o600,
     }
-    result = {}
+    result: dict[str, Any] = {}
     for path, expected_mode in sensitive.items():
         host_path = _get_host_path(path)
         if os.path.exists(host_path):
@@ -200,7 +201,7 @@ def _check_sensitive_files() -> dict:
                 result[path] = {
                     "actual_mode": oct(actual_mode),
                     "expected_max_mode": oct(expected_mode),
-                    "too_permissive": actual_mode > expected_mode,
+                    "too_permissive": bool(actual_mode & ~expected_mode),
                     "owner_uid": st.st_uid,
                 }
             except Exception as e:
@@ -245,8 +246,8 @@ def _find_unowned_files() -> list[str]:
     return unowned
 
 
-def _check_cron_perms() -> dict:
-    result = {}
+def _check_cron_perms() -> dict[str, Any]:
+    result: dict[str, Any] = {}
     cron_paths = ["/etc/crontab", "/etc/cron.d", "/etc/cron.daily",
                   "/etc/cron.hourly", "/etc/cron.weekly", "/etc/cron.monthly"]
     for path in cron_paths:
@@ -264,8 +265,8 @@ def _check_cron_perms() -> dict:
     return result
 
 
-def _check_ssh_key_perms() -> dict:
-    result = {}
+def _check_ssh_key_perms() -> dict[str, Any]:
+    result: dict[str, Any] = {}
     ssh_dir = _get_host_path("/etc/ssh")
     if not os.path.isdir(ssh_dir):
         return result
@@ -278,15 +279,15 @@ def _check_ssh_key_perms() -> dict:
                 result[f"/etc/ssh/{fname}"] = {
                     "mode": oct(mode),
                     "is_private": "key" in fname and "pub" not in fname,
-                    "too_permissive": (mode & 0o077) != 0,
+                    "too_permissive": bool(mode & (0o022 if fname.endswith(".pub") else 0o077)),
                 }
             except Exception:
                 pass
     return result
 
 
-def _check_root_history() -> dict:
-    result = {}
+def _check_root_history() -> dict[str, Any]:
+    result: dict[str, Any] = {}
     history_files = ["/root/.bash_history", "/root/.zsh_history", "/root/.history"]
     for path in history_files:
         host_path = _get_host_path(path)
@@ -303,7 +304,7 @@ def _check_root_history() -> dict:
     return result
 
 
-def _check_path_dirs() -> list[dict]:
+def _check_path_dirs() -> list[dict[str, Any]]:
     result = []
     path_env = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
     for dir_path in path_env.split(":"):

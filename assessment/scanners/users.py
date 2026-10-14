@@ -1,8 +1,9 @@
+from typing import Any
 import os
 import subprocess
 import logging
 from assessment.scanners.base import BaseScanner
-from assessment.config import ETC_PATH, HOME_PATH
+from assessment.config import ETC_PATH, HOME_PATH, HOST_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -10,8 +11,8 @@ logger = logging.getLogger(__name__)
 class UsersScanner(BaseScanner):
     name = "users"
 
-    def _scan(self) -> tuple[dict, list]:
-        result = {}
+    def _scan(self) -> tuple[dict[str, Any], list]:
+        result: dict[str, Any] = {}
         result["passwd"] = _read_passwd()
         result["shadow_permissions"] = _check_shadow_perms()
         result["sudo_config"] = _read_sudo_config()
@@ -27,7 +28,7 @@ class UsersScanner(BaseScanner):
         return result, []
 
 
-def _read_passwd() -> list[dict]:
+def _read_passwd() -> list[dict[str, Any]]:
     users = []
     try:
         with open(f"{ETC_PATH}/passwd") as f:
@@ -54,9 +55,9 @@ def _read_passwd() -> list[dict]:
     return users
 
 
-def _check_shadow_perms() -> dict:
+def _check_shadow_perms() -> dict[str, Any]:
     shadow_path = f"{ETC_PATH}/shadow"
-    result = {"path": shadow_path}
+    result: dict[str, Any] = {"path": shadow_path}
     try:
         st = os.stat(shadow_path)
         mode = st.st_mode & 0o777
@@ -88,8 +89,8 @@ def _check_shadow_perms() -> dict:
     return result
 
 
-def _read_sudo_config() -> dict:
-    result = {}
+def _read_sudo_config() -> dict[str, Any]:
+    result: dict[str, Any] = {}
     sudoers_path = f"{ETC_PATH}/sudoers"
     try:
         with open(sudoers_path) as f:
@@ -109,7 +110,7 @@ def _read_sudo_config() -> dict:
     return result
 
 
-def _read_groups() -> list[dict]:
+def _read_groups() -> list[dict[str, Any]]:
     groups = []
     try:
         with open(f"{ETC_PATH}/group") as f:
@@ -127,8 +128,8 @@ def _read_groups() -> list[dict]:
     return groups
 
 
-def _read_ssh_server_config() -> dict:
-    result = {}
+def _read_ssh_server_config() -> dict[str, Any]:
+    result: dict[str, Any] = {}
     paths = [
         f"{ETC_PATH}/ssh/sshd_config",
         f"{ETC_PATH}/ssh/sshd_config.d",
@@ -158,10 +159,10 @@ def _read_ssh_server_config() -> dict:
     return result
 
 
-def _check_user_ssh_keys() -> dict:
-    result = {}
+def _check_user_ssh_keys() -> dict[str, Any]:
+    result: dict[str, Any] = {}
     # Check root
-    root_ssh = "/root/.ssh"
+    root_ssh = os.path.join(HOST_ROOT or "/", "root", ".ssh")
     if os.path.isdir(root_ssh):
         auth_keys = os.path.join(root_ssh, "authorized_keys")
         if os.path.exists(auth_keys):
@@ -180,7 +181,7 @@ def _check_user_ssh_keys() -> dict:
         if os.path.isdir(HOME_PATH):
             home_base = HOME_PATH
         else:
-            home_base = "/home"
+            return result
         for user_dir in os.listdir(home_base):
             auth_keys = os.path.join(home_base, user_dir, ".ssh", "authorized_keys")
             if os.path.exists(auth_keys):
@@ -197,17 +198,14 @@ def _check_user_ssh_keys() -> dict:
     return result
 
 
-def _check_legacy_files() -> dict:
-    result = {}
+def _check_legacy_files() -> dict[str, Any]:
+    result: dict[str, Any] = {}
     legacy_files = [".rhosts", ".netrc", ".shosts"]
-    check_dirs = ["/root"]
+    check_dirs = [os.path.join(HOST_ROOT or "/", "root")]
     try:
         if os.path.isdir(HOME_PATH):
             for d in os.listdir(HOME_PATH):
                 check_dirs.append(os.path.join(HOME_PATH, d))
-        else:
-            for d in os.listdir("/home"):
-                check_dirs.append(os.path.join("/home", d))
     except Exception:
         pass
 
@@ -253,8 +251,8 @@ def _get_failed_logins() -> str:
             return ""
 
 
-def _check_password_policy() -> dict:
-    result = {}
+def _check_password_policy() -> dict[str, Any]:
+    result: dict[str, Any] = {}
     # Check pwquality
     pwquality_path = f"{ETC_PATH}/security/pwquality.conf"
     if os.path.exists(pwquality_path):
@@ -274,8 +272,8 @@ def _check_password_policy() -> dict:
     return result
 
 
-def _check_su_restrictions() -> dict:
-    result = {}
+def _check_su_restrictions() -> dict[str, Any]:
+    result: dict[str, Any] = {}
     su_pam = f"{ETC_PATH}/pam.d/su"
     if os.path.exists(su_pam):
         try:

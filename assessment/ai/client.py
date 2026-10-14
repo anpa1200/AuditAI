@@ -4,6 +4,7 @@ import time
 from anthropic import Anthropic, APIError, RateLimitError, AuthenticationError
 from assessment.config import ANTHROPIC_API_KEY, DEFAULT_MODEL
 from assessment.ai.prompts import SYSTEM_PROMPT
+from assessment.ai.errors import InsufficientCreditsError
 
 logger = logging.getLogger(__name__)
 
@@ -26,15 +27,10 @@ def _is_fatal_api_error(exc: Exception) -> bool:
     return any(phrase.lower() in msg for phrase in _FATAL_PHRASES)
 
 
-class InsufficientCreditsError(Exception):
-    """Raised when the Anthropic account has no credits."""
-    pass
-
-
 class AIClient:
     def __init__(self, model: str = DEFAULT_MODEL, api_key: str = ""):
         self.model = model
-        self.client = Anthropic(api_key=api_key or ANTHROPIC_API_KEY)
+        self.client = Anthropic(api_key=api_key or ANTHROPIC_API_KEY, max_retries=0, timeout=60.0)
 
     def analyze(self, prompt: str, max_tokens: int = 4096) -> dict:
         """Send a prompt and return parsed JSON response."""
@@ -45,14 +41,21 @@ class AIClient:
                     max_tokens=max_tokens,
                     system=SYSTEM_PROMPT,
                     messages=[{"role": "user", "content": prompt}],
-                    temperature=0,
                 )
-                content = response.content[0].text.strip()
+                if getattr(response, "stop_reason", None) == "max_tokens":
+                    raise ValueError("AI response exceeded the token limit")
+                text = getattr(response.content[0], "text", None) if response.content else None
+                if not isinstance(text, str):
+                    raise ValueError("AI response has no text content")
+                content = text.strip()
                 # Strip markdown code fences if present
                 if content.startswith("```"):
                     lines = content.splitlines()
                     content = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
-                return json.loads(content)
+                parsed = json.loads(content)
+                if not isinstance(parsed, dict):
+                    raise ValueError("AI response must be a JSON object")
+                return parsed
 
             except AuthenticationError as e:
                 raise InsufficientCreditsError(
@@ -61,15 +64,18 @@ class AIClient:
 
             except RateLimitError:
                 wait = RETRY_DELAY * (2 ** attempt)
-                logger.warning(f"Rate limited, waiting {wait}s (attempt {attempt+1}/{MAX_RETRIES})")
-                time.sleep(wait)
+                if attempt < MAX_RETRIES - 1:
+                    logger.warning(f"Rate limited, waiting {wait}s (attempt {attempt+1}/{MAX_RETRIES})")
+                    time.sleep(wait)
+                else:
+                    logger.error("Rate limited: all %s attempts exhausted", MAX_RETRIES)
 
-            except json.JSONDecodeError as e:
-                logger.error(f"JSON decode error: {e}")
+            except ValueError as e:
+                logger.error(f"Invalid AI response: {e}")
                 if attempt == MAX_RETRIES - 1:
                     return {
-                        "error": f"JSON decode failed: {e}",
-                        "findings": [], "module_risk_score": 0,
+                        "error": f"Invalid AI response: {e}",
+                        "module_risk_score": None,
                         "module_summary": "AI analysis failed",
                     }
                 time.sleep(RETRY_DELAY)
@@ -86,13 +92,13 @@ class AIClient:
                 if attempt == MAX_RETRIES - 1:
                     return {
                         "error": str(e),
-                        "findings": [], "module_risk_score": 0,
+                        "module_risk_score": None,
                         "module_summary": "AI analysis failed",
                     }
                 time.sleep(RETRY_DELAY)
 
         return {
             "error": "max retries exceeded",
-            "findings": [], "module_risk_score": 0,
+            "module_risk_score": None,
             "module_summary": "AI analysis failed",
         }

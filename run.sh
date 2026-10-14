@@ -25,8 +25,15 @@ if ! docker info &>/dev/null; then
   exit 1
 fi
 
-# Check API key
-if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+# Check API key unless AI was explicitly disabled.
+EXTRA_FLAGS=()
+AI_DISABLED=false
+for argument in "$@"; do
+  if [[ "$argument" == "--no-ai" ]]; then
+    AI_DISABLED=true
+  fi
+done
+if [[ "$AI_DISABLED" == false && -z "${ANTHROPIC_API_KEY:-}" ]]; then
   echo "WARNING: ANTHROPIC_API_KEY is not set."
   echo "         AI analysis will be disabled unless you pass --no-ai"
   echo ""
@@ -35,7 +42,7 @@ if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
     echo "Aborted. Set ANTHROPIC_API_KEY and re-run."
     exit 1
   fi
-  EXTRA_FLAGS="--no-ai"
+  EXTRA_FLAGS=(--no-ai)
 fi
 
 # ─── Build image ──────────────────────────────────────────────────────────────
@@ -59,7 +66,7 @@ echo "│  • -v /:/host:ro  (read host filesystem)             │"
 echo "│  • CAP_NET_RAW, CAP_NET_ADMIN (nmap SYN scans)       │"
 echo "│  • CAP_SYS_PTRACE (read /proc/<pid>/exe)             │"
 echo "│                                                       │"
-echo "│  All mounts are READ-ONLY. No changes to host.       │"
+echo "│  Host mounts are read-only; /output is writable.    │"
 echo "└─────────────────────────────────────────────────────┘"
 echo ""
 read -rp "Proceed with assessment? (y/N): " confirm
@@ -91,7 +98,7 @@ docker run --rm \
   -e "HOST_ROOT=/host" \
   -e "OUTPUT_DIR=/output" \
   "${IMAGE_NAME}" \
-  ${EXTRA_FLAGS:-} \
+  "${EXTRA_FLAGS[@]}" \
   "$@"
 
 echo ""

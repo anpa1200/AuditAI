@@ -1,0 +1,6 @@
+pyproject.toml
+tests
+scripts
+run.sh
+MANIFEST.in
+.github

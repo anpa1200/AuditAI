@@ -1,9 +1,10 @@
+from typing import Any
 import os
 import subprocess
 import logging
 from assessment.scanners.base import BaseScanner
 from assessment.config import (
-    ETC_PATH, PROC_PATH, SYS_PATH, BOOT_PATH, SYSCTL_CHECKS
+    ETC_PATH, PROC_PATH, SYS_PATH, BOOT_PATH, HOST_ROOT, SYSCTL_CHECKS
 )
 
 logger = logging.getLogger(__name__)
@@ -12,8 +13,8 @@ logger = logging.getLogger(__name__)
 class OSHardeningScanner(BaseScanner):
     name = "os_hardening"
 
-    def _scan(self) -> tuple[dict, list]:
-        result = {}
+    def _scan(self) -> tuple[dict[str, Any], list]:
+        result: dict[str, Any] = {}
         result["sysctl_params"] = _check_sysctl()
         result["kernel_cmdline"] = _read_cmdline()
         result["apparmor"] = _check_apparmor()
@@ -31,8 +32,8 @@ class OSHardeningScanner(BaseScanner):
         return result, []
 
 
-def _check_sysctl() -> dict:
-    results = {}
+def _check_sysctl() -> dict[str, Any]:
+    results: dict[str, Any] = {}
     for param, (expected, description) in SYSCTL_CHECKS.items():
         sysfs_path = f"{PROC_PATH}/sys/" + param.replace(".", "/")
         try:
@@ -45,6 +46,9 @@ def _check_sysctl() -> dict:
                 "description": description,
             }
         except Exception:
+            if HOST_ROOT and HOST_ROOT != "/":
+                results[param] = {"error": "host value not readable", "expected": str(expected)}
+                continue
             # Try via sysctl command
             try:
                 out = subprocess.check_output(
@@ -70,8 +74,8 @@ def _read_cmdline() -> str:
         return ""
 
 
-def _check_apparmor() -> dict:
-    result = {}
+def _check_apparmor() -> dict[str, Any]:
+    result: dict[str, Any] = {}
     aa_status = f"{SYS_PATH}/kernel/security/apparmor/profiles"
     if os.path.exists(aa_status):
         try:
@@ -105,11 +109,11 @@ def _check_apparmor() -> dict:
     return result
 
 
-def _check_selinux() -> dict:
+def _check_selinux() -> dict[str, Any]:
     selinux_path = f"{SYS_PATH}/fs/selinux"
     if not os.path.exists(selinux_path):
         return {"status": "not present"}
-    result = {"status": "present"}
+    result: dict[str, Any] = {"status": "present"}
     enforce_path = os.path.join(selinux_path, "enforce")
     try:
         with open(enforce_path) as f:
@@ -121,8 +125,8 @@ def _check_selinux() -> dict:
     return result
 
 
-def _check_secure_boot() -> dict:
-    efi_path = "/sys/firmware/efi/efivars"
+def _check_secure_boot() -> dict[str, Any]:
+    efi_path = os.path.join(SYS_PATH, "firmware", "efi", "efivars")
     if not os.path.exists(efi_path):
         return {"status": "EFI not present (legacy boot or no EFI vars)"}
     try:
@@ -132,13 +136,13 @@ def _check_secure_boot() -> dict:
         return {"status": "EFI present", "error": str(e)}
 
 
-def _read_grub_config() -> dict:
+def _read_grub_config() -> dict[str, Any]:
     paths = [
         f"{BOOT_PATH}/grub/grub.cfg",
         f"{BOOT_PATH}/grub2/grub.cfg",
         f"{ETC_PATH}/default/grub",
     ]
-    result = {}
+    result: dict[str, Any] = {}
     for path in paths:
         if os.path.exists(path):
             try:
@@ -159,9 +163,9 @@ def _read_grub_config() -> dict:
     return result
 
 
-def _read_login_defs() -> dict:
+def _read_login_defs() -> dict[str, Any]:
     path = f"{ETC_PATH}/login.defs"
-    result = {}
+    result: dict[str, Any] = {}
     try:
         with open(path) as f:
             for line in f:
@@ -175,8 +179,8 @@ def _read_login_defs() -> dict:
     return result
 
 
-def _read_pam_config() -> dict:
-    result = {}
+def _read_pam_config() -> dict[str, Any]:
+    result: dict[str, Any] = {}
     pam_files = [
         "common-auth", "common-password", "common-account",
         "common-session", "su", "sudo", "login", "sshd",
@@ -192,8 +196,8 @@ def _read_pam_config() -> dict:
     return result
 
 
-def _check_issue_files() -> dict:
-    result = {}
+def _check_issue_files() -> dict[str, Any]:
+    result: dict[str, Any] = {}
     for fname in ["issue", "issue.net"]:
         path = f"{ETC_PATH}/{fname}"
         if os.path.exists(path):
@@ -214,8 +218,8 @@ def _read_motd() -> str:
         return ""
 
 
-def _check_umask() -> dict:
-    result = {}
+def _check_umask() -> dict[str, Any]:
+    result: dict[str, Any] = {}
     # Check profile files for umask settings
     for fname in ["/etc/profile", "/etc/bash.bashrc", "/etc/login.defs"]:
         real_path = fname if fname.startswith("/etc/") else f"{ETC_PATH}/{fname}"
@@ -248,8 +252,8 @@ def _get_audit_rules() -> str:
         return ""
 
 
-def _check_coredump() -> dict:
-    result = {}
+def _check_coredump() -> dict[str, Any]:
+    result: dict[str, Any] = {}
     coredump_conf = f"{ETC_PATH}/systemd/coredump.conf"
     limits_conf = f"{ETC_PATH}/security/limits.conf"
     for path in [coredump_conf, limits_conf]:
@@ -262,8 +266,8 @@ def _check_coredump() -> dict:
     return result
 
 
-def _check_time_sync() -> dict:
-    result = {}
+def _check_time_sync() -> dict[str, Any]:
+    result: dict[str, Any] = {}
     try:
         result["timedatectl"] = subprocess.check_output(
             ["timedatectl", "status"], text=True, timeout=5, stderr=subprocess.DEVNULL

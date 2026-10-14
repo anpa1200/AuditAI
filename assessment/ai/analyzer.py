@@ -4,7 +4,8 @@ import time
 from assessment.models import ModuleResult, Finding, AttackChain, Report
 from assessment.ai.prompts import MODULE_ANALYSIS_PROMPT, SYNTHESIS_PROMPT
 from assessment.ai.preprocessor import preprocess
-from assessment.config import SEVERITY_ORDER
+from assessment.ai.errors import InsufficientCreditsError
+from assessment.ai.validation import validate_module, validate_synthesis
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +22,17 @@ class Analyzer:
         """Run per-module AI analysis sequentially to respect Tier 1 rate limits."""
         updated = []
 
+        errored = [mr for mr in module_results if mr.error]
         to_analyze = [mr for mr in module_results if not mr.error]
         for i, mr in enumerate(to_analyze):
             try:
                 updated.append(self._analyze_module(mr))
+            except InsufficientCreditsError:
+                raise
             except Exception as e:
+                mr.error = f"AI analysis failed: {e}"
+                mr.module_risk_score = None
+                mr.module_summary = "AI analysis failed"
                 logger.error(f"Module analysis failed for {mr.module_name}: {e}")
                 updated.append(mr)
             # Pause between calls except after the last one
@@ -33,7 +40,6 @@ class Analyzer:
                 time.sleep(INTER_REQUEST_DELAY)
 
         # Add errored modules as-is
-        errored = [mr for mr in module_results if mr.error]
         updated.extend(errored)
 
         # Preserve original order
@@ -67,11 +73,19 @@ class Analyzer:
 
         response = self.client.analyze(prompt, max_tokens=8192)
 
+        if isinstance(response, dict) and response.get("error"):
+            mr.error = f"AI analysis failed: {response['error']}"
+            mr.module_risk_score = None
+            mr.module_summary = "AI analysis failed"
+            logger.error("Module %s: %s", mr.module_name, mr.error)
+            return mr
+
+        validate_module(response)
         findings = []
         for f in response.get("findings", []):
             try:
                 findings.append(Finding(
-                    id=f.get("id", f"finding_{len(findings)}"),
+                    id=f"{mr.module_name}:{f['id']}",
                     title=f.get("title", "Untitled"),
                     severity=f.get("severity", "INFO"),
                     category=mr.module_name,
@@ -119,6 +133,7 @@ class Analyzer:
             ]
             module_summaries.append({
                 "module": mr.module_name,
+                "error": mr.error,
                 "risk_score": mr.module_risk_score,
                 "summary": mr.module_summary,
                 "findings": findings_data,
@@ -153,6 +168,18 @@ def build_report(
     host_context: dict,
     scan_timestamp: str,
 ) -> Report:
+    if not isinstance(synthesis, dict) or not synthesis.get("error"):
+        try:
+            validate_synthesis(synthesis)
+            known_ids = {f.id for mr in module_results for f in mr.findings}
+            referenced_ids = set(synthesis["top_10_priorities"])
+            for chain in synthesis["attack_chains"]:
+                referenced_ids.update(chain["findings_involved"])
+            if referenced_ids - known_ids:
+                raise ValueError("Synthesis references unknown finding IDs")
+        except ValueError as exc:
+            synthesis = {"error": f"Invalid AI synthesis response: {exc}"}
+
     attack_chains = []
     for chain in synthesis.get("attack_chains", []):
         attack_chains.append(AttackChain(
@@ -168,6 +195,11 @@ def build_report(
         if mr.module_name == "lynis":
             lynis_score = mr.raw_output.get("hardening_index")
 
+    errors = [f"{mr.module_name}: {mr.error}" for mr in module_results if mr.error]
+    if synthesis.get("error"):
+        errors.append(f"AI synthesis failed: {synthesis['error']}")
+    error = "; ".join(errors) or None
+
     report = Report(
         hostname=host_context.get("hostname", "unknown"),
         scan_timestamp=scan_timestamp,
@@ -175,10 +207,11 @@ def build_report(
         module_results=module_results,
         attack_chains=attack_chains,
         top_priorities=synthesis.get("top_10_priorities", []),
-        overall_risk_score=synthesis.get("overall_risk_score", 0),
-        overall_risk_rating=synthesis.get("overall_risk_rating", "MEDIUM"),
+        overall_risk_score=None if error else synthesis.get("overall_risk_score", 0),
+        overall_risk_rating="UNKNOWN" if error else synthesis.get("overall_risk_rating", "MEDIUM"),
         executive_summary=synthesis.get("executive_summary", ""),
         lynis_score=lynis_score,
         recommended_actions=synthesis.get("recommended_immediate_actions", []),
+        error=error,
     )
     return report

@@ -1,9 +1,10 @@
+from typing import Any
 import os
 import subprocess
 import glob
 import logging
 from assessment.scanners.base import BaseScanner
-from assessment.config import ETC_PATH, RUN_PATH, PROC_PATH
+from assessment.config import ETC_PATH, RUN_PATH, VAR_PATH, HOST_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -11,8 +12,8 @@ logger = logging.getLogger(__name__)
 class ServicesScanner(BaseScanner):
     name = "services"
 
-    def _scan(self) -> tuple[dict, list]:
-        result = {}
+    def _scan(self) -> tuple[dict[str, Any], list]:
+        result: dict[str, Any] = {}
         result["systemd_units"] = _get_systemd_units()
         result["systemd_failed"] = _get_failed_units()
         result["listening_processes"] = _get_listening_processes()
@@ -25,9 +26,11 @@ class ServicesScanner(BaseScanner):
         return result, []
 
 
-def _get_systemd_units() -> list[dict]:
+def _get_systemd_units() -> list[dict[str, Any]]:
     """List systemd service units via systemctl, falling back to filesystem scan
     when running inside a Docker container where systemctl is unavailable."""
+    if HOST_ROOT and HOST_ROOT != "/":
+        return _get_systemd_units_from_fs()
     try:
         out = subprocess.check_output(
             ["systemctl", "list-units", "--type=service", "--all",
@@ -51,7 +54,7 @@ def _get_systemd_units() -> list[dict]:
         return _get_systemd_units_from_fs()
 
 
-def _get_systemd_units_from_fs() -> list[dict]:
+def _get_systemd_units_from_fs() -> list[dict[str, Any]]:
     """Read installed systemd unit files from host filesystem (Docker fallback)."""
     from assessment.config import HOST_ROOT
     units = []
@@ -132,8 +135,8 @@ def _get_listening_processes() -> str:
         return ""
 
 
-def _get_cron_jobs() -> dict:
-    result = {}
+def _get_cron_jobs() -> dict[str, Any]:
+    result: dict[str, Any] = {}
     cron_paths = [
         f"{ETC_PATH}/crontab",
         f"{ETC_PATH}/cron.d",
@@ -159,7 +162,7 @@ def _get_cron_jobs() -> dict:
                     pass
 
     # User cron spool
-    spool_dir = "/var/spool/cron"
+    spool_dir = os.path.join(VAR_PATH, "spool", "cron")
     if os.path.isdir(spool_dir):
         try:
             for user in os.listdir(spool_dir):
@@ -172,9 +175,9 @@ def _get_cron_jobs() -> dict:
     return result
 
 
-def _check_docker_socket() -> dict:
-    socket_path = "/var/run/docker.sock"
-    result = {"path": socket_path, "exists": False}
+def _check_docker_socket() -> dict[str, Any]:
+    socket_path = os.path.join(RUN_PATH, "docker.sock")
+    result: dict[str, Any] = {"path": socket_path, "exists": False}
     if os.path.exists(socket_path):
         result["exists"] = True
         st = os.stat(socket_path)
@@ -182,7 +185,8 @@ def _check_docker_socket() -> dict:
         result["owner_uid"] = st.st_uid
         result["owner_gid"] = st.st_gid
         # World-readable docker socket is a critical finding
-        result["world_readable"] = bool(st.st_mode & 0o006)
+        result["world_readable"] = bool(st.st_mode & 0o004)
+        result["world_writable"] = bool(st.st_mode & 0o002)
     return result
 
 
@@ -196,8 +200,8 @@ def _get_at_jobs() -> list[str]:
         return []
 
 
-def _check_inetd() -> dict:
-    result = {}
+def _check_inetd() -> dict[str, Any]:
+    result: dict[str, Any] = {}
     for name in ["inetd", "xinetd"]:
         conf = f"{ETC_PATH}/{name}.conf"
         if os.path.exists(conf):

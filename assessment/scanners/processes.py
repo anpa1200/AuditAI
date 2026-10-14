@@ -1,3 +1,4 @@
+from typing import Any
 import os
 import subprocess
 import logging
@@ -28,8 +29,8 @@ CAP_NAMES = {
 class ProcessesScanner(BaseScanner):
     name = "processes"
 
-    def _scan(self) -> tuple[dict, list]:
-        result = {}
+    def _scan(self) -> tuple[dict[str, Any], list]:
+        result: dict[str, Any] = {}
         processes = _enumerate_processes()
         result["total_process_count"] = len(processes)
         result["root_processes"] = [p for p in processes if p.get("uid") == 0]
@@ -50,7 +51,7 @@ class ProcessesScanner(BaseScanner):
         return result, []
 
 
-def _enumerate_processes() -> list[dict]:
+def _enumerate_processes() -> list[dict[str, Any]]:
     processes = []
     try:
         proc_base = PROC_PATH
@@ -58,7 +59,7 @@ def _enumerate_processes() -> list[dict]:
             if not pid_str.isdigit():
                 continue
             pid = int(pid_str)
-            proc = {"pid": pid}
+            proc: dict[str, Any] = {"pid": pid}
             proc_dir = os.path.join(proc_base, pid_str)
 
             # Read status
@@ -128,7 +129,7 @@ def _get_network_processes() -> str:
         return ""
 
 
-def _find_suspicious(processes: list[dict]) -> list[dict]:
+def _find_suspicious(processes: list[dict[str, Any]]) -> list[dict[str, Any]]:
     suspicious = []
     suspicious_names = {
         "nc", "netcat", "ncat", "bash", "sh", "python", "perl", "ruby",

@@ -43,9 +43,16 @@ def outcome(status: str, resolution: str) -> str:
     return "pending"
 
 
+def issue_id(value: str) -> str:
+    """Accept only numeric tracker IDs, without URL/output injection."""
+    if not re.fullmatch(r"[0-9]+", value) or int(value) <= 0:
+        raise argparse.ArgumentTypeError("issue ID must be a positive integer")
+    return value
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("issue_id")
+    parser.add_argument("issue_id", type=issue_id)
     parser.add_argument("--output", default="")
     args = parser.parse_args()
 

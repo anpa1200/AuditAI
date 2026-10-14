@@ -25,11 +25,17 @@ jobs:
       - name: Detect status change
         id: change
         shell: bash
+        env:
+          STATUS_KEY: ${{ steps.kali.outputs.status_key }}
         run: |
-          current="kali-status-${{ steps.kali.outputs.status_key }}"
+          current="kali-status-$STATUS_KEY"
           previous="$(gh issue view "$TRACKER_ISSUE" --json labels --jq '.labels[].name' | grep '^kali-status-' || true)"
           echo "current=$current" >> "$GITHUB_OUTPUT"
-          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+          {
+            echo "previous<<LABELS"
+            echo "$previous"
+            echo "LABELS"
+          } >> "$GITHUB_OUTPUT"
           if [[ "$current" != "$previous" ]]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
@@ -38,24 +44,40 @@ jobs:
       - name: Update tracker issue
         if: steps.change.outputs.changed == 'true'
         shell: bash
+        env:
+          PREVIOUS_LABELS: ${{ steps.change.outputs.previous }}
+          CURRENT_LABEL: ${{ steps.change.outputs.current }}
+          KALI_STATUS: ${{ steps.kali.outputs.status }}
+          KALI_RESOLUTION: ${{ steps.kali.outputs.resolution }}
+          KALI_OUTCOME: ${{ steps.kali.outputs.outcome }}
+          KALI_ASSIGNED_TO: ${{ steps.kali.outputs.assigned_to }}
+          KALI_LAST_MODIFIED: ${{ steps.kali.outputs.last_modified }}
+          KALI_URL: ${{ steps.kali.outputs.url }}
         run: |
-          previous="${{ steps.change.outputs.previous }}"
-          if [[ -n "$previous" ]]; then
-            gh issue edit "$TRACKER_ISSUE" --remove-label "$previous"
-          fi
-          gh label create "${{ steps.change.outputs.current }}" --color 1D76DB --force
-          gh issue edit "$TRACKER_ISSUE" --add-label "${{ steps.change.outputs.current }}"
-          gh issue comment "$TRACKER_ISSUE" --body "$(cat <<EOF
-          Kali submission status changed.
-
-          - Status: **${{ steps.kali.outputs.status }}**
-          - Resolution: **${{ steps.kali.outputs.resolution }}**
-          - Outcome: **${{ steps.kali.outputs.outcome }}**
-          - Assigned to: ${{ steps.kali.outputs.assigned_to }}
-          - Kali update: ${{ steps.kali.outputs.last_modified }}
-          - Issue: ${{ steps.kali.outputs.url }}
-          EOF
-          )"
+          while IFS= read -r previous; do
+            if [[ -n "$previous" ]]; then
+              gh issue edit "$TRACKER_ISSUE" --remove-label "$previous"
+            fi
+          done <<< "$PREVIOUS_LABELS"
+          gh label create "$CURRENT_LABEL" --color 1D76DB --force
+          gh issue edit "$TRACKER_ISSUE" --add-label "$CURRENT_LABEL"
+          python - <<'PYTHON'
+          import os
+          from pathlib import Path
+          body = "Kali submission status changed.\n\n" + "\n".join(
+              f"- {label}: {os.environ[key]}"
+              for label, key in (
+                  ("Status", "KALI_STATUS"),
+                  ("Resolution", "KALI_RESOLUTION"),
+                  ("Outcome", "KALI_OUTCOME"),
+                  ("Assigned to", "KALI_ASSIGNED_TO"),
+                  ("Kali update", "KALI_LAST_MODIFIED"),
+                  ("Issue", "KALI_URL"),
+              )
+          )
+          Path("kali-comment.txt").write_text(body, encoding="utf-8")
+          PYTHON
+          gh issue comment "$TRACKER_ISSUE" --body-file kali-comment.txt
       - name: Send status-change email
         if: steps.change.outputs.changed == 'true'
         env:
