@@ -95,6 +95,7 @@ def generate_markdown(report: Report, output_dir: str) -> str:
     lines += ["## Detailed Findings by Module", ""]
 
     for mr in report.module_results:
+        module_score = "unavailable" if mr.module_risk_score is None else f"{mr.module_risk_score}/100"
         if mr.error:
             lines += [
                 f"### {mr.module_name.replace('_', ' ').title()}",
@@ -106,7 +107,7 @@ def generate_markdown(report: Report, output_dir: str) -> str:
         lines += [
             f"### {mr.module_name.replace('_', ' ').title()}",
             f"",
-            f"**Risk Score:** {"unavailable" if mr.module_risk_score is None else str(mr.module_risk_score) + "/100"} | "
+            f"**Risk Score:** {module_score} | "
             f"**Findings:** {len(mr.findings)} | "
             f"**Duration:** {mr.duration_seconds:.1f}s",
             f"",

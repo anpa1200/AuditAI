@@ -46,6 +46,7 @@ def generate_html(report: Report, output_dir: str) -> str:
     # Build module sections
     module_sections = ""
     for mr in report.module_results:
+        module_score = "unavailable" if mr.module_risk_score is None else f"{mr.module_risk_score}/100"
         error_html = f'<div class="error-box">Module failed: {_esc(mr.error)}</div>' if mr.error else ""
         findings_html = ""
         if mr.findings:
@@ -71,7 +72,7 @@ def generate_html(report: Report, output_dir: str) -> str:
           <div class="module-header" onclick="toggleSection(this)">
             <span class="module-title">{mr.module_name.replace("_", " ").title()}</span>
             <div class="module-meta">
-              <span class="risk-score">Risk: {"unavailable" if mr.module_risk_score is None else str(mr.module_risk_score) + "/100"}</span>
+              <span class="risk-score">Risk: {module_score}</span>
               <span class="finding-count">{len(mr.findings)} findings</span>
               <span class="duration">{mr.duration_seconds:.1f}s</span>
               <span class="chevron">▼</span>
